@@ -9,19 +9,19 @@
   "license": "MIT",
   "keywords": ["jieli", "claude-code", "session-sync"],
   "userConfig": {
-    "base_url": {
-      "type": "string",
-      "title": "Jieli base URL",
-      "description": "Base URL for your Jieli instance. Defaults to https://jieli.app; set this only for self-hosted instances.",
-      "default": "https://jieli.app",
-      "required": false
-    },
     "api_key": {
       "type": "string",
       "title": "Jieli API key",
       "description": "API key used to upload and read your Jieli threads.",
       "sensitive": true,
       "required": true
+    },
+    "base_url": {
+      "type": "string",
+      "title": "Jieli base URL",
+      "description": "Base URL for your Jieli instance. Defaults to https://jieli.app; set this only for self-hosted instances.",
+      "default": "https://jieli.app",
+      "required": false
     }
   }
 }
