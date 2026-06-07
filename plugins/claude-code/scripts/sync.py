@@ -22,7 +22,6 @@ from redact import redact_json, redact_text
 
 
 PROVIDER = "claude_code"
-DEFAULT_LABELS = ["claude-code"]
 DEFAULT_BASE_URL = "https://jieli.app"
 LOCK_TTL_SECONDS = 60
 TRANSCRIPT_FLUSH_TRIGGERS = {"stop", "sessionend", "precompact"}
@@ -106,7 +105,7 @@ def build_payload_from_hook(hook_data: dict[str, Any], base_url: str | None = No
         "repo": repo_from_cwd(cwd),
         "branch": branch,
         "source_url": source_url,
-        "labels": DEFAULT_LABELS,
+        "labels": [],
         "thread": thread_payload,
     }
 

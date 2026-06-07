@@ -225,6 +225,7 @@ class SyncScriptTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["provider"], "claude_code")
+        self.assertEqual(payload["labels"], [])
         self.assertEqual(payload["repo"], "work/jieli")
         self.assertEqual(payload["branch"], "plugin/sync")
         self.assertEqual(payload["source_url"], "https://jieli.example.test/threads/T-cc-1")
