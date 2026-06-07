@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Jieli plugins for syncing AI coding sessions.",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "plugins": [
     {
       "name": "claude-code",
       "description": "Sync Claude Code sessions to Jieli threads and attach Jieli thread trailers to Claude-created commits.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "Jieli"
       },

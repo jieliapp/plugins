@@ -1223,7 +1223,7 @@ class HookInstallTests(unittest.TestCase):
             }
         }
 
-        installed = install_hooks(settings, plugin_root="/plugins/claude-code", version="0.1.0")
+        installed = install_hooks(settings, plugin_root="/plugins/claude-code", version="0.1.1")
         commands = [
             hook["command"]
             for config in installed["hooks"]["UserPromptSubmit"]
@@ -1234,7 +1234,7 @@ class HookInstallTests(unittest.TestCase):
             any(
                 "sync.py" in command
                 and "--trigger userpromptsubmit" in command
-                and "--hook-version 0.1.0" in command
+                and "--hook-version 0.1.1" in command
                 for command in commands
             )
         )

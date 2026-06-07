@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger sessionstart --hook-version 0.1.0 --jieli-hook"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger sessionstart --hook-version 0.1.1 --jieli-hook"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger userpromptsubmit --hook-version 0.1.0 --jieli-hook"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger userpromptsubmit --hook-version 0.1.1 --jieli-hook"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger precompact --hook-version 0.1.0 --jieli-hook"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger precompact --hook-version 0.1.1 --jieli-hook"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger stop --hook-version 0.1.0 --jieli-hook"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger stop --hook-version 0.1.1 --jieli-hook"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger sessionend --hook-version 0.1.0 --jieli-hook"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger sessionend --hook-version 0.1.1 --jieli-hook"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/commit_trailer.py\" --hook-version 0.1.0 --jieli-hook"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/commit_trailer.py\" --hook-version 0.1.1 --jieli-hook"
           }
         ]
       }

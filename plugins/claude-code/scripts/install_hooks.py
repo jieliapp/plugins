@@ -75,7 +75,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["install", "uninstall"])
     parser.add_argument("--plugin-root", default=str(Path(__file__).resolve().parents[1]))
-    parser.add_argument("--version", default="0.1.0")
+    parser.add_argument("--version", default="0.1.1")
     parser.add_argument("--settings", default=str(settings_path()))
     args = parser.parse_args()
     path = Path(args.settings)
