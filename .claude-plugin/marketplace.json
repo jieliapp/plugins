@@ -1,0 +1,21 @@
+{
+  "name": "jieli",
+  "owner": {
+    "name": "Jieli"
+  },
+  "metadata": {
+    "description": "Jieli plugins for syncing AI coding sessions.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "claude-code",
+      "description": "Sync Claude Code sessions to Jieli threads and attach Jieli thread trailers to Claude-created commits.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Jieli"
+      },
+      "source": "./plugins/claude-code"
+    }
+  ]
+}

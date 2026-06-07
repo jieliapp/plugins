@@ -2,34 +2,38 @@
 
 Plugins for syncing AI coding sessions to [Jieli](https://jieli.app).
 
-## Claude Code
+## Install
 
-Install the Claude Code plugin:
+Add the marketplace in Claude Code:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/jieliapp/jieli-plugins/main/install-claude-code.sh | bash
+```text
+/plugin marketplace add jieliapp/jieli-plugins
 ```
 
-Then configure your API key:
+Install the plugin:
+
+```text
+/plugin install claude-code@jieli
+```
+
+Reload plugins:
+
+```text
+/reload-plugins
+```
+
+Then get an API key from [https://jieli.app](https://jieli.app) and configure it for Claude Code.
+
+You can also set it through your shell environment before starting Claude Code:
 
 ```bash
 export JIELI_API_KEY="your-jieli-api-key"
 ```
 
-You can get an API key from [https://jieli.app](https://jieli.app).
-
-For self-hosted Jieli:
+For self-hosted Jieli, also set:
 
 ```bash
 export JIELI_BASE_URL="https://your-jieli.example.com"
-export JIELI_API_KEY="your-jieli-api-key"
-```
-
-Manual install:
-
-```bash
-git clone https://github.com/jieliapp/jieli-plugins.git ~/.jieli/plugins/jieli-plugins
-claude plugin install ~/.jieli/plugins/jieli-plugins/claude-code
 ```
 
 ## What It Does
