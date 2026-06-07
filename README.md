@@ -16,13 +16,19 @@ Install the plugin:
 /plugin install claude-code@jieli
 ```
 
+Then get an API key from [https://jieli.app](https://jieli.app) and configure it for Claude Code.
+
+When Claude Code opens the plugin configuration screen, set:
+
+```text
+Jieli API key = your-jieli-api-key
+```
+
 Reload plugins:
 
 ```text
 /reload-plugins
 ```
-
-Then get an API key from [https://jieli.app](https://jieli.app) and configure it for Claude Code.
 
 You can also set it through your shell environment before starting Claude Code:
 
