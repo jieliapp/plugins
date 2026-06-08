@@ -292,6 +292,46 @@ class SyncScriptTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["repo"], "jieliapp/plugins")
+        self.assertEqual(payload["repo_url"], "https://github.com/jieliapp/plugins")
+
+    def test_build_payload_uses_self_hosted_git_remote_repo_url(self):
+        from sync import build_payload_from_hook
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "work" / "project"
+            repo.mkdir(parents=True)
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                ["git", "remote", "add", "origin", "git@git.example.test:team/project.git"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "uuid": "u-gitea",
+                        "sessionId": "cc-gitea",
+                        "cwd": str(repo),
+                        "gitBranch": "plugin/sync",
+                        "timestamp": "2026-06-06T09:00:00.000Z",
+                        "message": {"role": "user", "content": "sync this self-hosted repo"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "cc-gitea", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+            )
+
+        self.assertEqual(payload["repo"], "team/project")
+        self.assertEqual(payload.get("repo_url"), "https://git.example.test/team/project")
 
     def test_build_payload_leaves_repo_empty_without_github_remote(self):
         from sync import build_payload_from_hook
@@ -322,6 +362,7 @@ class SyncScriptTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["repo"], "")
+        self.assertEqual(payload["repo_url"], "")
 
     def test_build_payload_uploads_structured_image_blocks(self):
         from sync import build_payload_from_hook
