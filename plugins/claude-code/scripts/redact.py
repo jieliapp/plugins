@@ -164,6 +164,9 @@ SECRET_RULES: tuple[RedactionRule, ...] = (
     ),
     RedactionRule("e2b-token", re.compile(r"\be2b_[A-Za-z0-9_-]{20,}\b"), ("e2b_",)),
     RedactionRule(
+        "jieli-api-key", re.compile(r"\bjieli_[A-Za-z0-9_-]{20,}\b"), ("jieli_",)
+    ),
+    RedactionRule(
         "google-api-key",
         re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
         ("AIza",),
