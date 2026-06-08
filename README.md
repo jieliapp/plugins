@@ -7,7 +7,7 @@ Plugins for syncing AI coding sessions to [Jieli](https://jieli.app).
 Add the marketplace in Claude Code:
 
 ```text
-/plugin marketplace add jieliapp/jieli-plugins
+/plugin marketplace add jieliapp/plugins
 ```
 
 Install the plugin:
