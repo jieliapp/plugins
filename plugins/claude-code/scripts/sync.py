@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -107,9 +108,11 @@ def build_payload_from_hook(hook_data: dict[str, Any], base_url: str | None = No
     }
     if resolved_model and resolved_model != display_model:
         thread_payload["resolved_model"] = resolved_model
+    repo_info = repo_info_from_cwd(cwd)
     return {
         "provider": PROVIDER,
-        "repo": repo_from_cwd(cwd),
+        "repo": repo_info["repo"],
+        "repo_url": repo_info["repo_url"],
         "branch": branch,
         "source_url": source_url,
         "labels": [],
@@ -546,6 +549,10 @@ def title_from_messages(messages: list[dict[str, Any]]) -> str:
 
 
 def repo_from_cwd(cwd: str) -> str:
+    return repo_info_from_cwd(cwd)["repo"]
+
+
+def repo_info_from_cwd(cwd: str) -> dict[str, str]:
     try:
         result = subprocess.run(
             ["git", "config", "--get", "remote.origin.url"],
@@ -557,34 +564,64 @@ def repo_from_cwd(cwd: str) -> str:
             timeout=2,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return ""
+        return {"repo": "", "repo_url": ""}
     if result.returncode != 0:
-        return ""
-    return repo_from_repository_url(result.stdout)
+        return {"repo": "", "repo_url": ""}
+    return repo_info_from_remote_url(result.stdout)
 
 
-def repo_from_repository_url(raw: str) -> str:
+def repo_info_from_remote_url(raw: str) -> dict[str, str]:
     value = raw.strip().rstrip("/")
     if value.endswith(".git"):
         value = value[:-4]
-    prefixes = (
-        "https://github.com/",
-        "http://github.com/",
-        "git@github.com:",
-        "ssh://git@github.com/",
-    )
-    for prefix in prefixes:
-        if value.startswith(prefix):
-            return valid_github_repo_slug(value[len(prefix) :])
-    return ""
+    if not value:
+        return {"repo": "", "repo_url": ""}
+    if "://" not in value:
+        return repo_info_from_scp_remote_url(value)
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme not in {"http", "https", "ssh", "git"}:
+        return {"repo": "", "repo_url": ""}
+    host = parsed.hostname or ""
+    repo = valid_repo_path(parsed.path.strip("/"))
+    if not host or not repo:
+        return {"repo": "", "repo_url": ""}
+    if parsed.scheme in {"http", "https"}:
+        netloc = host_with_port(parsed)
+        repo_url = urllib.parse.urlunsplit((parsed.scheme, netloc, f"/{repo}", "", ""))
+    else:
+        repo_url = f"https://{host}/{repo}"
+    return {"repo": repo, "repo_url": repo_url}
 
 
-def valid_github_repo_slug(value: str) -> str:
-    parts = value.split("/")
-    if len(parts) != 2:
+def repo_info_from_scp_remote_url(value: str) -> dict[str, str]:
+    match = re.fullmatch(r"(?:[^@/:]+@)?([^:/]+):(.+)", value)
+    if match is None:
+        return {"repo": "", "repo_url": ""}
+    host = match.group(1)
+    repo = valid_repo_path(match.group(2))
+    if not host or not repo:
+        return {"repo": "", "repo_url": ""}
+    return {"repo": repo, "repo_url": f"https://{host}/{repo}"}
+
+
+def host_with_port(parsed: urllib.parse.SplitResult) -> str:
+    host = parsed.hostname or ""
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    return f"{host}:{port}" if port else host
+
+
+def valid_repo_path(value: str) -> str:
+    path = value.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = [part for part in path.split("/") if part]
+    if len(parts) < 2:
         return ""
     if all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts):
-        return value
+        return "/".join(parts)
     return ""
 
 
