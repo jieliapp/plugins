@@ -926,6 +926,46 @@ class SyncScriptTests(unittest.TestCase):
         self.assertEqual(captured["timeout"], 20)
         self.assertEqual(result["success"], True)
 
+    def test_main_skips_silently_when_transcript_not_flushed_yet(self):
+        from sync import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            missing_transcript = home / "projects" / "p" / "session.jsonl"
+            stdin = io.StringIO(
+                json.dumps(
+                    {
+                        "transcript_path": str(missing_transcript),
+                        "session_id": "cc-not-flushed",
+                        "cwd": "/Users/alice/work/jieli",
+                    }
+                )
+            )
+            with (
+                patch.dict(os.environ, {"JIELI_API_KEY": "secret"}, clear=True),
+                patch.object(sys, "argv", ["sync.py", "--trigger", "sessionstart", "--jieli-hook"]),
+                patch("sys.stdin", stdin),
+                patch.object(Path, "home", return_value=home),
+            ):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertFalse((home / ".jieli" / "hooks.log").exists())
+
+    def test_sync_lock_is_scoped_per_session(self):
+        from sync import SyncLock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            with SyncLock(home=home, session_id="sess-A") as lock_a:
+                self.assertTrue(lock_a.acquired)
+                # A different session must not be blocked by session A's lock.
+                with SyncLock(home=home, session_id="sess-B") as lock_b:
+                    self.assertTrue(lock_b.acquired)
+                # The same session is still mutually excluded (no duplicate upload).
+                with SyncLock(home=home, session_id="sess-A") as lock_a2:
+                    self.assertFalse(lock_a2.acquired)
+
 
 class ReadThreadScriptTests(unittest.TestCase):
     def test_fetches_markdown_export_for_thread_id_with_api_key(self):

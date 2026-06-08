@@ -486,9 +486,10 @@ def git_branch(cwd: str) -> str:
 
 
 class SyncLock:
-    def __init__(self, home: Path | None = None):
+    def __init__(self, home: Path | None = None, session_id: str = ""):
         self.home = home or Path.home()
-        self.path = self.home / ".jieli" / "sync.lock"
+        safe = re.sub(r"[^A-Za-z0-9_-]", "", session_id or "")
+        self.path = self.home / ".jieli" / (f"sync-{safe}.lock" if safe else "sync.lock")
         self.acquired = False
 
     def __enter__(self) -> "SyncLock":
@@ -650,11 +651,16 @@ def main() -> int:
             if response:
                 print(json.dumps(response))
             raise KeyError(", ".join(missing))
-        with SyncLock() as lock:
+        hook_data = load_hook_stdin()
+        session_id = hook_data.get("session_id") or ""
+        with SyncLock(session_id=session_id) as lock:
             if not lock.acquired:
                 return 0
-            hook_data = load_hook_stdin()
             transcript_path = hook_data.get("transcript_path")
+            if transcript_path and not Path(transcript_path).exists():
+                # Transcript not flushed to disk yet (common on SessionStart /
+                # UserPromptSubmit). A later hook will sync once it exists.
+                return 0
             if args.trigger.lower() in TRANSCRIPT_FLUSH_TRIGGERS and transcript_path:
                 wait_for_transcript_flush(Path(transcript_path))
             base_url = (optional_env("JIELI_BASE_URL", "CLAUDE_PLUGIN_OPTION_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
