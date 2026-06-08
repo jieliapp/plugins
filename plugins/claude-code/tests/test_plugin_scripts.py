@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -238,7 +239,7 @@ class SyncScriptTests(unittest.TestCase):
 
         self.assertEqual(payload["provider"], "claude_code")
         self.assertEqual(payload["labels"], [])
-        self.assertEqual(payload["repo"], "work/jieli")
+        self.assertEqual(payload["repo"], "")
         self.assertEqual(payload["branch"], "plugin/sync")
         self.assertEqual(payload["source_url"], "https://jieli.example.test/threads/T-cc-1")
         self.assertEqual(payload["thread"]["id"], "T-cc-1")
@@ -253,6 +254,74 @@ class SyncScriptTests(unittest.TestCase):
         self.assertNotIn("sk-ant-secret-value", raw_payload)
         self.assertNotIn("abc.def.ghi", raw_payload)
         self.assertNotIn("tool.secret", raw_payload)
+
+    def test_build_payload_uses_git_remote_repo_slug(self):
+        from sync import build_payload_from_hook
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "github" / "plugins"
+            repo.mkdir(parents=True)
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                ["git", "remote", "add", "origin", "git@github.com:jieliapp/plugins.git"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "uuid": "u-remote",
+                        "sessionId": "cc-remote",
+                        "cwd": str(repo),
+                        "gitBranch": "plugin/sync",
+                        "timestamp": "2026-06-06T09:00:00.000Z",
+                        "message": {"role": "user", "content": "sync this repo"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "cc-remote", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+            )
+
+        self.assertEqual(payload["repo"], "jieliapp/plugins")
+
+    def test_build_payload_leaves_repo_empty_without_github_remote(self):
+        from sync import build_payload_from_hook
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "github" / "plugins"
+            repo.mkdir(parents=True)
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "uuid": "u-local",
+                        "sessionId": "cc-local",
+                        "cwd": str(repo),
+                        "gitBranch": "plugin/sync",
+                        "timestamp": "2026-06-06T09:00:00.000Z",
+                        "message": {"role": "user", "content": "sync local folder"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "cc-local", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+            )
+
+        self.assertEqual(payload["repo"], "")
 
     def test_build_payload_uploads_structured_image_blocks(self):
         from sync import build_payload_from_hook

@@ -546,10 +546,46 @@ def title_from_messages(messages: list[dict[str, Any]]) -> str:
 
 
 def repo_from_cwd(cwd: str) -> str:
-    parts = [part for part in Path(cwd).parts if part not in {"/", ""}]
-    if len(parts) >= 2:
-        return "/".join(parts[-2:])
-    return parts[0] if parts else ""
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=cwd or None,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return repo_from_repository_url(result.stdout)
+
+
+def repo_from_repository_url(raw: str) -> str:
+    value = raw.strip().rstrip("/")
+    if value.endswith(".git"):
+        value = value[:-4]
+    prefixes = (
+        "https://github.com/",
+        "http://github.com/",
+        "git@github.com:",
+        "ssh://git@github.com/",
+    )
+    for prefix in prefixes:
+        if value.startswith(prefix):
+            return valid_github_repo_slug(value[len(prefix) :])
+    return ""
+
+
+def valid_github_repo_slug(value: str) -> str:
+    parts = value.split("/")
+    if len(parts) != 2:
+        return ""
+    if all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts):
+        return value
+    return ""
 
 
 def timestamp_ms(value: Any) -> int:
