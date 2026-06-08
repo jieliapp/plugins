@@ -39,6 +39,13 @@ MODEL_ALIAS_ENV_NAMES = (
 IMAGE_PLACEHOLDER_RE = re.compile(r"\[Image:\s*source:\s*([^\]]+)\]")
 IMAGE_LABEL_RE = re.compile(r"\[Image\s+#\d+\]")
 SUPPORTED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+COMPACTION_PLACEHOLDER = (
+    "[Context compacted — earlier conversation summarized to continue past the context window]"
+)
+BASH_INPUT_RE = re.compile(r"<bash-input>(.*?)</bash-input>", re.DOTALL)
+BASH_STDOUT_RE = re.compile(r"<bash-stdout>(.*?)</bash-stdout>", re.DOTALL)
+BASH_STDERR_RE = re.compile(r"<bash-stderr>(.*?)</bash-stderr>", re.DOTALL)
+BASH_NO_OUTPUT_MARKERS = {"", "(Bash completed with no output)"}
 
 ImageUploader = Callable[[Path], str]
 
@@ -119,6 +126,8 @@ def parse_transcript(path: Path, fallback_session_id: str | None = None, image_u
     model = ""
     created_ms = 0
     updated_ms = 0
+    pending_bash_index: int | None = None
+    pending_bash_command = ""
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
@@ -132,28 +141,63 @@ def parse_transcript(path: Path, fallback_session_id: str | None = None, image_u
             message = entry.get("message")
             if not isinstance(message, dict):
                 continue
-            content = normalize_content(message.get("content"), image_uploader=image_uploader)
-            if content is None:
-                continue
-            role = normalized_role(message.get("role") or entry.get("type"), content)
-            content = normalize_local_command_message(role, content)
-            if content is None or is_loaded_skill_body_message(role, content):
-                continue
-            source_message_id = message.get("id") or ""
-            item = {
-                "role": role,
-                "content": content,
-                "message_id": entry.get("uuid") or source_message_id or message.get("message_id") or "",
-            }
-            usage = message.get("usage")
-            if isinstance(usage, dict):
-                item["usage"] = redact_json(usage)
-            protocol_id = message.get("protocolMessageID") or message.get("protocol_message_id")
-            if protocol_id:
-                item["protocol_message_id"] = protocol_id
-            if is_duplicate_unavailable_image_message(messages, item):
-                continue
-            append_transcript_message(messages, merge_sources, item, source_message_id)
+
+            if entry.get("isCompactSummary"):
+                # Replace the (very long) auto-compaction summary with a short
+                # placeholder: keep the timeline marker without bloating the payload.
+                content = COMPACTION_PLACEHOLDER
+                role = "user"
+            else:
+                content = normalize_content(message.get("content"), image_uploader=image_uploader)
+                if content is None:
+                    continue
+                role = normalized_role(message.get("role") or entry.get("type"), content)
+                content = normalize_local_command_message(role, content)
+                if content is None or is_loaded_skill_body_message(role, content):
+                    continue
+
+            bash = parse_bash_block(content) if role == "user" and isinstance(content, str) else None
+            if (
+                bash is not None
+                and bash["kind"] == "output"
+                and pending_bash_index is not None
+                and pending_bash_index == len(messages) - 1
+            ):
+                # Fold a `!command` stdout/stderr message into the bash block
+                # emitted just before it, rendering both as one terminal view.
+                messages[pending_bash_index]["content"] = render_bash_terminal(
+                    pending_bash_command, bash["stdout"], bash["stderr"]
+                )
+                pending_bash_index = None
+            else:
+                if bash is not None:
+                    if bash["kind"] == "input":
+                        content = render_bash_terminal(bash["command"], note_empty=False)
+                    elif bash["kind"] == "input_output":
+                        content = render_bash_terminal(bash["command"], bash["stdout"], bash["stderr"])
+                    else:
+                        content = render_bash_terminal(None, bash["stdout"], bash["stderr"])
+                source_message_id = message.get("id") or ""
+                item = {
+                    "role": role,
+                    "content": content,
+                    "message_id": entry.get("uuid") or source_message_id or message.get("message_id") or "",
+                }
+                usage = message.get("usage")
+                if isinstance(usage, dict):
+                    item["usage"] = redact_json(usage)
+                protocol_id = message.get("protocolMessageID") or message.get("protocol_message_id")
+                if protocol_id:
+                    item["protocol_message_id"] = protocol_id
+                if is_duplicate_unavailable_image_message(messages, item):
+                    continue
+                append_transcript_message(messages, merge_sources, item, source_message_id)
+                if bash is not None and bash["kind"] == "input":
+                    pending_bash_index = len(messages) - 1
+                    pending_bash_command = bash["command"]
+                else:
+                    pending_bash_index = None
+
             session_id = session_id or entry.get("sessionId") or entry.get("session_id") or ""
             cwd = cwd or entry.get("cwd") or ""
             branch = branch or entry.get("gitBranch") or entry.get("git_branch") or ""
@@ -263,6 +307,57 @@ def normalize_local_command_message(role: str, content: Any) -> Any | None:
     if any(text.startswith(prefix) for prefix in skippable_local_command_prefixes):
         return None
     return content
+
+
+def parse_bash_block(text: str) -> dict[str, Any] | None:
+    # Only treat messages that *start* with a bash tag as real `!command`
+    # injections. Prose that merely quotes a <bash-input> tag is left untouched.
+    stripped = text.strip()
+    starts_input = stripped.startswith("<bash-input>")
+    starts_output = stripped.startswith("<bash-stdout>") or stripped.startswith("<bash-stderr>")
+    if not starts_input and not starts_output:
+        return None
+    has_output = "<bash-stdout>" in stripped or "<bash-stderr>" in stripped
+    if starts_input:
+        command = first_tag_capture(BASH_INPUT_RE, stripped)
+        if has_output:
+            return {
+                "kind": "input_output",
+                "command": command,
+                "stdout": first_tag_capture(BASH_STDOUT_RE, stripped),
+                "stderr": first_tag_capture(BASH_STDERR_RE, stripped),
+            }
+        return {"kind": "input", "command": command}
+    return {
+        "kind": "output",
+        "stdout": first_tag_capture(BASH_STDOUT_RE, stripped),
+        "stderr": first_tag_capture(BASH_STDERR_RE, stripped),
+    }
+
+
+def first_tag_capture(pattern: re.Pattern[str], text: str) -> str:
+    match = pattern.search(text)
+    return match.group(1) if match else ""
+
+
+def render_bash_terminal(command: str | None, stdout: str = "", stderr: str = "", note_empty: bool = True) -> str:
+    out = stdout.strip()
+    err = stderr.strip()
+    if out in BASH_NO_OUTPUT_MARKERS:
+        out = ""
+    if err in BASH_NO_OUTPUT_MARKERS:
+        err = ""
+    lines: list[str] = []
+    if command is not None:
+        lines.append(f"$ {command.strip()}")
+    if out:
+        lines.append(out)
+    if err:
+        lines.append("# [stderr]")
+        lines.append(err)
+    if not out and not err and command is not None and note_empty:
+        lines.append("# (no output)")
+    return "```console\n" + "\n".join(lines) + "\n```"
 
 
 def tag_text(text: str, tag_name: str) -> str:
@@ -445,7 +540,7 @@ def title_from_messages(messages: list[dict[str, Any]]) -> str:
         if message.get("role") != "user":
             continue
         content = message.get("content")
-        if isinstance(content, str) and content.strip():
+        if isinstance(content, str) and content.strip() and content != COMPACTION_PLACEHOLDER:
             return content.strip()[:80]
     return "Claude Code session"
 

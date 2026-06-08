@@ -966,6 +966,248 @@ class SyncScriptTests(unittest.TestCase):
                 with SyncLock(home=home, session_id="sess-A") as lock_a2:
                     self.assertFalse(lock_a2.acquired)
 
+    def test_redact_text_removes_jieli_api_key(self):
+        from redact import redact_text
+
+        redacted = redact_text("config jieli_uTN9dHsMCoOgMPBLRnQq_1JkfimaKU2ZfP")
+
+        self.assertIn("[REDACTED:jieli-api-key]", redacted)
+        self.assertNotIn("jieli_uTN9dHsMCoOgMPBLRnQq_1JkfimaKU2ZfP", redacted)
+
+    def test_build_payload_replaces_compaction_summary_with_placeholder(self):
+        from sync import COMPACTION_PLACEHOLDER, build_payload_from_hook
+
+        long_summary = "This session is being continued from a previous conversation. " + "x" * 5000
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-real",
+                                "sessionId": "cc-compact",
+                                "cwd": "/Users/alice/work/jieli",
+                                "message": {"role": "user", "content": "原始第一条消息"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-compact",
+                                "sessionId": "cc-compact",
+                                "isCompactSummary": True,
+                                "isVisibleInTranscriptOnly": True,
+                                "message": {"role": "user", "content": long_summary},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "assistant",
+                                "uuid": "a-1",
+                                "sessionId": "cc-compact",
+                                "message": {"role": "assistant", "content": [{"type": "text", "text": "继续"}]},
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {
+                    "session_id": "cc-compact",
+                    "transcript_path": str(transcript),
+                    "cwd": "/Users/alice/work/jieli",
+                },
+                base_url="https://jieli.example.test",
+            )
+
+        messages = payload["thread"]["messages"]
+        self.assertEqual(messages[1]["content"], COMPACTION_PLACEHOLDER)
+        self.assertNotIn("x" * 5000, json.dumps(payload, ensure_ascii=False))
+        self.assertEqual(payload["thread"]["title"], "原始第一条消息")
+
+    def test_build_payload_merges_bash_input_and_output_into_terminal_block(self):
+        from sync import build_payload_from_hook
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-bash-in",
+                                "sessionId": "cc-bash",
+                                "cwd": "/Users/alice/work/jieli",
+                                "message": {"role": "user", "content": "<bash-input>ls -la</bash-input>"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-bash-out",
+                                "sessionId": "cc-bash",
+                                "message": {
+                                    "role": "user",
+                                    "content": "<bash-stdout>total 8\ndrwxr-xr-x  2 a b</bash-stdout><bash-stderr></bash-stderr>",
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {
+                    "session_id": "cc-bash",
+                    "transcript_path": str(transcript),
+                    "cwd": "/Users/alice/work/jieli",
+                },
+                base_url="https://jieli.example.test",
+            )
+
+        messages = payload["thread"]["messages"]
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"], "```console\n$ ls -la\ntotal 8\ndrwxr-xr-x  2 a b\n```")
+        self.assertNotIn("<bash-input>", messages[0]["content"])
+        self.assertNotIn("<bash-stdout>", messages[0]["content"])
+
+    def test_build_payload_redacts_secret_inside_bash_stdout(self):
+        from sync import build_payload_from_hook
+
+        fake_key = "jieli_" + "a" * 30
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-bash-in",
+                                "sessionId": "cc-leak",
+                                "cwd": "/Users/alice/work/jieli",
+                                "message": {"role": "user", "content": "<bash-input>echo $JIELI_API_KEY</bash-input>"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-bash-out",
+                                "sessionId": "cc-leak",
+                                "message": {
+                                    "role": "user",
+                                    "content": f"<bash-stdout>{fake_key}</bash-stdout><bash-stderr></bash-stderr>",
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {
+                    "session_id": "cc-leak",
+                    "transcript_path": str(transcript),
+                    "cwd": "/Users/alice/work/jieli",
+                },
+                base_url="https://jieli.example.test",
+            )
+
+        content = payload["thread"]["messages"][0]["content"]
+        self.assertNotIn(fake_key, json.dumps(payload, ensure_ascii=False))
+        self.assertIn("[REDACTED:jieli-api-key]", content)
+        self.assertIn("$ echo $JIELI_API_KEY", content)
+
+    def test_build_payload_renders_bash_block_with_no_output(self):
+        from sync import build_payload_from_hook
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-bash-in",
+                                "sessionId": "cc-rm",
+                                "cwd": "/Users/alice/work/jieli",
+                                "message": {"role": "user", "content": "<bash-input>rm -rf /tmp/x</bash-input>"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "user",
+                                "uuid": "u-bash-out",
+                                "sessionId": "cc-rm",
+                                "message": {
+                                    "role": "user",
+                                    "content": "<bash-stdout>(Bash completed with no output)</bash-stdout><bash-stderr></bash-stderr>",
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {
+                    "session_id": "cc-rm",
+                    "transcript_path": str(transcript),
+                    "cwd": "/Users/alice/work/jieli",
+                },
+                base_url="https://jieli.example.test",
+            )
+
+        messages = payload["thread"]["messages"]
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"], "```console\n$ rm -rf /tmp/x\n# (no output)\n```")
+
+    def test_build_payload_keeps_prose_that_merely_quotes_bash_tags(self):
+        from sync import build_payload_from_hook
+
+        prose = "我用 `!rm -rf x` 执行了：<bash-input>rm -rf x</bash-input><bash-stdout>(Bash completed with no output)</bash-stdout> 你看下"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "uuid": "u-prose",
+                        "sessionId": "cc-prose",
+                        "cwd": "/Users/alice/work/jieli",
+                        "message": {"role": "user", "content": prose},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {
+                    "session_id": "cc-prose",
+                    "transcript_path": str(transcript),
+                    "cwd": "/Users/alice/work/jieli",
+                },
+                base_url="https://jieli.example.test",
+            )
+
+        # Prose discussing the tags must be preserved verbatim, not rendered as a terminal block.
+        self.assertEqual(payload["thread"]["messages"][0]["content"], prose)
+        self.assertNotIn("```console", payload["thread"]["messages"][0]["content"])
+
 
 class ReadThreadScriptTests(unittest.TestCase):
     def test_fetches_markdown_export_for_thread_id_with_api_key(self):
