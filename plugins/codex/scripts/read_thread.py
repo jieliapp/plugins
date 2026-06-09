@@ -10,9 +10,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import jieli_config
+
 
 DEFAULT_MAX_CHARS = 20000
-DEFAULT_BASE_URL = "https://jieli.app"
+DEFAULT_BASE_URL = jieli_config.DEFAULT_BASE_URL
 EXPORT_TIMEOUT_SECONDS = 20
 
 
@@ -84,6 +86,10 @@ def limit_output(
 
 
 def required_env(*names: str) -> str:
+    if names and names[0] == "JIELI_API_KEY":
+        value = jieli_config.get_api_key()
+        if value:
+            return value
     for name in names:
         value = os.environ.get(name)
         if value:
@@ -92,6 +98,8 @@ def required_env(*names: str) -> str:
 
 
 def optional_env(*names: str) -> str:
+    if names and names[0] == "JIELI_BASE_URL":
+        return jieli_config.get_base_url()
     for name in names:
         value = os.environ.get(name)
         if value:

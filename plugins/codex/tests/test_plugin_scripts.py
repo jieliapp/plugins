@@ -235,17 +235,68 @@ class CodexSyncScriptTests(unittest.TestCase):
                 self.assertEqual(find_session_transcript("content-only"), transcript)
 
     def test_missing_config_response_is_visible_on_user_prompt_submit(self):
-        from sync import build_missing_config_hook_response
+        from sync import build_missing_config_hook_response, missing_config_vars
 
-        response = build_missing_config_hook_response("userpromptsubmit", ["JIELI_API_KEY"])
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(Path, "home", return_value=Path(tmpdir)):
+            missing = missing_config_vars({})
+            response = build_missing_config_hook_response("userpromptsubmit", missing)
 
         self.assertTrue(response["continue"])
         self.assertIn("systemMessage", response)
-        self.assertIn("JIELI_API_KEY", response["systemMessage"])
+        self.assertIn("settings.json", response["systemMessage"])
         self.assertIn("https://jieli.app", response["systemMessage"])
         self.assertIn("create an API key", response["systemMessage"])
-        self.assertNotIn("JIELI_BASE_URL", response["systemMessage"])
-        self.assertNotIn("self-hosted", response["systemMessage"])
+        self.assertIn("chmod it to 600", response["systemMessage"])
+
+    def test_settings_file_satisfies_missing_config_and_base_url(self):
+        import jieli_config
+        from sync import build_payload_from_hook, missing_config_vars, required_env
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            settings_path = home / ".jieli" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"api_key": "jieli-settings-key", "base_url": "https://jieli.example.test"}),
+                encoding="utf-8",
+            )
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps({"type": "session_meta", "payload": {"id": "codex-settings", "cwd": "/Users/alice/work/jieli"}})
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.object(Path, "home", return_value=home), patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(missing_config_vars({}), [])
+                self.assertEqual(required_env("JIELI_API_KEY"), "jieli-settings-key")
+                self.assertEqual(jieli_config.get_base_url(), "https://jieli.example.test")
+                payload = build_payload_from_hook({"session_id": "codex-settings", "transcript_path": str(transcript)})
+
+        self.assertEqual(payload["source_url"], "https://jieli.example.test/threads/T-codex-settings")
+
+    def test_environment_overrides_settings_file(self):
+        import jieli_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            settings_path = home / ".jieli" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"api_key": "settings-key", "base_url": "https://settings.example.test"}),
+                encoding="utf-8",
+            )
+
+            env = {"JIELI_API_KEY": "env-key", "JIELI_BASE_URL": "https://env.example.test/"}
+            self.assertEqual(jieli_config.get_api_key(env, home=home), "env-key")
+            self.assertEqual(jieli_config.get_base_url(env, home=home), "https://env.example.test")
 
     def test_upload_payload_posts_to_plugin_endpoint(self):
         from sync import upload_payload
@@ -273,6 +324,28 @@ class CodexSyncScriptTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://jieli.example.test/plugin/threads/upload")
         self.assertEqual(captured["timeout"], 20)
         self.assertEqual(result["success"], True)
+
+    def test_format_hook_error_includes_redacted_http_body(self):
+        from sync import format_hook_error
+        import urllib.error
+
+        error = urllib.error.HTTPError(
+            "https://jieli.example.test/plugin/threads/upload",
+            400,
+            "Bad Request",
+            {},
+            io.BytesIO(b'{"error":"unsupported provider","api_key":"jieli_uTN9dHsMCoOgMPBLRnQq_1JkfimaKU2ZfP"}'),
+        )
+
+        try:
+            formatted = format_hook_error(error)
+        finally:
+            error.close()
+
+        self.assertIn("HTTPError: HTTP Error 400: Bad Request", formatted)
+        self.assertIn("unsupported provider", formatted)
+        self.assertIn("[REDACTED:jieli-api-key]", formatted)
+        self.assertNotIn("jieli_uTN9dHsMCoOgMPBLRnQq_1JkfimaKU2ZfP", formatted)
 
     def test_sync_lock_is_scoped_per_session(self):
         from sync import SyncLock
@@ -454,15 +527,60 @@ class CodexReadThreadTests(unittest.TestCase):
     def test_main_requires_jieli_api_key_only(self):
         from read_thread import main
 
-        with (
-            patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_API_KEY": "legacy"}, clear=True),
-            patch.object(sys, "argv", ["read_thread.py", "T-1"]),
-            patch("sys.stderr", io.StringIO()) as stderr,
-        ):
-            exit_code = main()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                patch.object(Path, "home", return_value=Path(tmpdir)),
+                patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_API_KEY": "legacy"}, clear=True),
+                patch.object(sys, "argv", ["read_thread.py", "T-1"]),
+                patch("sys.stderr", io.StringIO()) as stderr,
+            ):
+                exit_code = main()
 
         self.assertEqual(exit_code, 1)
         self.assertIn("JIELI_API_KEY", stderr.getvalue())
+
+    def test_read_thread_accepts_settings_api_key(self):
+        from read_thread import main
+
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+            def read(self):
+                return b"thread markdown"
+
+        def fake_urlopen(request, timeout):
+            captured["authorization"] = request.headers["Authorization"]
+            captured["url"] = request.full_url
+            return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            settings_path = home / ".jieli" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"api_key": "settings-key", "base_url": "https://jieli.example.test"}),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(Path, "home", return_value=home),
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(sys, "argv", ["read_thread.py", "T-1"]),
+                patch("urllib.request.urlopen", fake_urlopen),
+                patch("sys.stdout", io.StringIO()) as stdout,
+            ):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(captured["authorization"], "Bearer settings-key")
+        self.assertEqual(captured["url"], "https://jieli.example.test/threads/T-1.md")
+        self.assertEqual(stdout.getvalue(), "thread markdown")
 
 
 if __name__ == "__main__":

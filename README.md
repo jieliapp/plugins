@@ -58,15 +58,25 @@ codex plugin add codex@jieli
 
 Then enable the plugin and trust its hooks with `/hooks`.
 
-Set a Jieli API key in the environment used to start Codex:
+Configure the API key. Recommended for Codex: write `~/.jieli/settings.json`, which works even after Codex is already running:
+
+```bash
+mkdir -p ~/.jieli
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path.home() / ".jieli/settings.json"
+settings = {"api_key": "your-jieli-api-key", "base_url": "https://jieli.app"}
+path.write_text(json.dumps(settings, indent=2) + "\n")
+path.chmod(0o600)
+PY
+```
+
+For self-hosted Jieli, set `base_url` to your deployment URL. You can also use environment variables before starting Codex:
 
 ```bash
 export JIELI_API_KEY="your-jieli-api-key"
-```
-
-For self-hosted Jieli, also set:
-
-```bash
 export JIELI_BASE_URL="https://your-jieli.example.com"
 ```
 

@@ -16,17 +16,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+import jieli_config
 from redact import redact_json, redact_text
 
 
 PROVIDER = "codex"
-DEFAULT_BASE_URL = "https://jieli.app"
+DEFAULT_BASE_URL = jieli_config.DEFAULT_BASE_URL
 LOCK_TTL_SECONDS = 60
 TRANSCRIPT_FLUSH_TRIGGERS = {"stop", "precompact", "postcompact"}
 TRANSCRIPT_QUIET_SECONDS = 0.25
 TRANSCRIPT_FLUSH_TIMEOUT_SECONDS = 1.5
 TOOL_OUTPUT_MAX_CHARS = 20000
-CONFIG_ENV_GROUPS = (("JIELI_API_KEY", ("JIELI_API_KEY",)),)
 SESSION_MAPPING_FILE = "codex-sessions.json"
 COMPACTION_PLACEHOLDER = (
     "[Context compacted - earlier conversation summarized to continue past the context window]"
@@ -34,8 +34,7 @@ COMPACTION_PLACEHOLDER = (
 
 
 def missing_config_vars(environ: Mapping[str, str] | None = None) -> list[str]:
-    env = os.environ if environ is None else environ
-    return [primary for primary, names in CONFIG_ENV_GROUPS if not any(env.get(name) for name in names)]
+    return [] if jieli_config.get_api_key(environ) else ["JIELI_API_KEY or ~/.jieli/settings.json api_key"]
 
 
 def build_missing_config_hook_response(trigger: str, missing: list[str]) -> dict[str, Any]:
@@ -47,9 +46,10 @@ def build_missing_config_hook_response(trigger: str, missing: list[str]) -> dict
         "systemMessage": (
             "Jieli Codex Sync is not configured. "
             f"Missing: {missing_text}. "
-            f"Go to {DEFAULT_BASE_URL}, register or sign in, create an API key, then set JIELI_API_KEY "
-            "in the environment used to start Codex. "
-            "You can paste the API key into this chat and ask the agent to configure it for you. "
+            f"Go to {DEFAULT_BASE_URL}, register or sign in, create an API key. "
+            "Then either set JIELI_API_KEY before starting Codex, or ask the agent to write "
+            "`~/.jieli/settings.json` with `{\"api_key\":\"<key>\",\"base_url\":\"https://jieli.app\"}` "
+            "and chmod it to 600. "
             "Sync will stay disabled until configured."
         ),
     }
@@ -71,7 +71,7 @@ def build_payload_from_hook(hook_data: dict[str, Any], base_url: str | None = No
     if not session_id:
         raise ValueError("session_id is required")
 
-    base = (base_url or optional_env("JIELI_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    base = (base_url or jieli_config.get_base_url()).rstrip("/")
     provider_thread_id = jieli_thread_id(session_id)
     messages = transcript["messages"]
     thread_payload = {
@@ -494,6 +494,18 @@ def upload_payload(payload: dict[str, Any], base_url: str, api_key: str) -> dict
         return json.loads(response.read().decode("utf-8"))
 
 
+def format_hook_error(error: BaseException) -> str:
+    message = f"{type(error).__name__}: {error}"
+    if isinstance(error, urllib.error.HTTPError):
+        try:
+            body = error.read(4096).decode("utf-8", errors="replace").strip()
+        except OSError:
+            body = ""
+        if body:
+            message += f"; body={redact_text(body)}"
+    return message
+
+
 def session_mapping_path(home: Path | None = None) -> Path:
     return (home or Path.home()) / ".jieli" / SESSION_MAPPING_FILE
 
@@ -563,6 +575,10 @@ def transcript_signature(path: Path) -> tuple[int, int] | None:
 
 
 def required_env(*names: str) -> str:
+    if names and names[0] == "JIELI_API_KEY":
+        value = jieli_config.get_api_key()
+        if value:
+            return value
     for name in names:
         value = os.environ.get(name)
         if value:
@@ -571,6 +587,8 @@ def required_env(*names: str) -> str:
 
 
 def optional_env(*names: str) -> str:
+    if names and names[0] == "JIELI_BASE_URL":
+        return jieli_config.get_base_url()
     for name in names:
         value = os.environ.get(name)
         if value:
@@ -600,7 +618,7 @@ def main() -> int:
                 return 0
             if args.trigger.lower() in TRANSCRIPT_FLUSH_TRIGGERS and isinstance(transcript_path, str) and transcript_path:
                 wait_for_transcript_flush(Path(transcript_path))
-            base_url = (optional_env("JIELI_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+            base_url = jieli_config.get_base_url().rstrip("/")
             api_key = required_env("JIELI_API_KEY")
             payload = build_payload_from_hook(hook_data, base_url=base_url)
             upload_payload(payload, base_url, api_key)
@@ -612,7 +630,7 @@ def main() -> int:
                 session_path=transcript_path if isinstance(transcript_path, str) else "",
             )
     except (KeyError, ValueError, OSError, urllib.error.URLError, json.JSONDecodeError) as error:
-        log_hook_error(f"sync {args.trigger}: {type(error).__name__}: {error}")
+        log_hook_error(f"sync {args.trigger}: {format_hook_error(error)}")
     return 0
 
 

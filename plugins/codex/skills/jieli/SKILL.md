@@ -19,31 +19,70 @@ Do not use this skill for the current conversation when the needed context is al
 
 - A Jieli URL such as `https://jieli.example.com/threads/<provider_thread_id>`, `https://jieli.example.com/threads/<provider_thread_id>.md`, or a raw provider thread id.
 - The user's question or goal for reading the thread. If none is provided, summarize the recent goal, decisions, touched files, commands, verification, and open follow-ups.
-- Jieli credentials from `JIELI_API_KEY`.
-- Optional base URL from `JIELI_BASE_URL`. If omitted, use `https://jieli.app`.
+- Jieli credentials from `JIELI_API_KEY` or `~/.jieli/settings.json`.
+- Optional base URL from `JIELI_BASE_URL` or `~/.jieli/settings.json`. If omitted, use `https://jieli.app`.
 
 ## Environment
 
-Prefer these shell variables in examples:
+Use the helper scripts where possible; they read both environment variables and `~/.jieli/settings.json`.
+
+For shell examples that call Jieli directly, resolve credentials like this:
 
 ```bash
-BASE_URL="${JIELI_BASE_URL:-https://jieli.app}"
-API_KEY="$JIELI_API_KEY"
+API_KEY="$(python3 - <<'PY'
+import os, json
+from pathlib import Path
+if os.environ.get("JIELI_API_KEY"):
+    print(os.environ["JIELI_API_KEY"])
+else:
+    try:
+        print(json.loads((Path.home() / ".jieli/settings.json").read_text()).get("api_key", ""))
+    except Exception:
+        print("")
+PY
+)"
+BASE_URL="$(python3 - <<'PY'
+import os, json
+from pathlib import Path
+if os.environ.get("JIELI_BASE_URL"):
+    print(os.environ["JIELI_BASE_URL"].rstrip("/"))
+else:
+    try:
+        print((json.loads((Path.home() / ".jieli/settings.json").read_text()).get("base_url") or "https://jieli.app").rstrip("/"))
+    except Exception:
+        print("https://jieli.app")
+PY
+)"
 ROOT="${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}"
 ```
 
-If `API_KEY` is missing, ask the user to configure the plugin or export `JIELI_API_KEY`. Only ask for `JIELI_BASE_URL` when the user uses a self-hosted Jieli instance.
+If `API_KEY` is missing, ask the user for a Jieli API key and write it to `~/.jieli/settings.json` with mode `600`. Only ask for `JIELI_BASE_URL` when the user uses a self-hosted Jieli instance.
 
-To configure hosted Jieli, ask the user to sign in at `https://jieli.app`, copy an API key, and either:
+To configure hosted Jieli, ask the user to sign in at `https://jieli.app`, copy an API key, and then write:
 
-- Paste the key into the current agent chat and ask the agent to set it.
-- Export it manually before starting Codex:
-
-```bash
-export JIELI_API_KEY="<api-key-from-jieli.app>"
+```json
+{
+  "api_key": "<api-key-from-jieli.app>",
+  "base_url": "https://jieli.app"
+}
 ```
 
-For self-hosted Jieli, also set `JIELI_BASE_URL` to the deployment URL.
+Use:
+
+```bash
+mkdir -p ~/.jieli
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path.home() / ".jieli/settings.json"
+settings = {"api_key": "<api-key-from-jieli.app>", "base_url": "https://jieli.app"}
+path.write_text(json.dumps(settings, indent=2) + "\n")
+path.chmod(0o600)
+PY
+```
+
+Replace the placeholder before writing the file. For self-hosted Jieli, set `base_url` to the deployment URL.
 
 ## Read Procedure
 
