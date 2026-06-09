@@ -425,7 +425,7 @@ def normalize_text_blocks(text: str, image_uploader: ImageUploader | None = None
 
 
 def append_text_block(blocks: list[dict[str, Any]], text: str) -> None:
-    value = redact_text(strip_local_markdown_link_targets(text)).strip()
+    value = redact_text(file_url_local_markdown_link_targets(text)).strip()
     if value:
         blocks.append({"type": "text", "text": value})
 
@@ -558,12 +558,12 @@ def should_skip_user_message(content: Any) -> bool:
     return any(text.startswith(prefix) for prefix in skipped_prefixes)
 
 
-def strip_local_markdown_link_targets(text: str) -> str:
+def file_url_local_markdown_link_targets(text: str) -> str:
     def replace(match: re.Match[str]) -> str:
         label = match.group(1).strip()
         target = match.group(2).strip()
         if target.startswith("/Users/") or target.startswith("/var/") or target.startswith("/private/") or target.startswith("/tmp/"):
-            return label
+            return f"[{label}]({Path(target).as_uri()})"
         return match.group(0)
 
     return LOCAL_MARKDOWN_LINK_RE.sub(replace, text)

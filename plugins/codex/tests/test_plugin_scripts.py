@@ -322,7 +322,7 @@ Do not upload this loaded skill body.
         self.assertNotIn("Spec-Driven Planning", raw_payload)
         self.assertNotIn("SKILL.md", raw_payload)
 
-    def test_build_payload_strips_local_markdown_link_targets(self):
+    def test_build_payload_rewrites_local_markdown_link_targets_as_file_urls(self):
         from sync import build_payload_from_hook
 
         message = "use [$claude-code-setup:spec-driven-planning](/Users/alice/Library/Mobile Documents/com~apple~CloudDocs/dotfiles/config/claude/skills/spec-driven-planning/SKILL.md)"
@@ -351,8 +351,10 @@ Do not upload this loaded skill body.
             )
 
         content = payload["thread"]["messages"][0]["content"]
-        self.assertEqual(content, "use $claude-code-setup:spec-driven-planning")
-        self.assertNotIn("/Users/alice", json.dumps(payload, ensure_ascii=False))
+        self.assertEqual(
+            content,
+            "use [$claude-code-setup:spec-driven-planning](file:///Users/alice/Library/Mobile%20Documents/com~apple~CloudDocs/dotfiles/config/claude/skills/spec-driven-planning/SKILL.md)",
+        )
 
     def test_build_payload_includes_raw_repo_url_from_git_remote(self):
         from sync import build_payload_from_hook
