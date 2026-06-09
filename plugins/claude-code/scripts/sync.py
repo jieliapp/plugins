@@ -546,10 +546,6 @@ def title_from_messages(messages: list[dict[str, Any]]) -> str:
     return "Claude Code session"
 
 
-def repo_from_cwd(cwd: str) -> str:
-    return ""
-
-
 def repo_url_from_cwd(cwd: str) -> str:
     try:
         result = subprocess.run(
@@ -563,9 +559,7 @@ def repo_url_from_cwd(cwd: str) -> str:
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip()
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def timestamp_ms(value: Any) -> int:

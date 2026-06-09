@@ -1,0 +1,30 @@
+{
+  "name": "codex",
+  "version": "0.1.0+codex.20260609102652",
+  "description": "Sync Codex sessions to Jieli threads and attach Jieli thread trailers to Codex-created commits.",
+  "author": {
+    "name": "Jieli"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jieli",
+    "codex",
+    "session-sync"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Jieli Codex Sync",
+    "shortDescription": "Sync Codex sessions to Jieli.",
+    "longDescription": "Jieli Codex Sync uploads local Codex session transcripts to Jieli, redacts common secrets, provides a Jieli thread reading skill, and adds best-effort Jieli-Thread trailers to Codex-created git commits.",
+    "developerName": "Jieli",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Read this Jieli thread.",
+      "Search my synced Codex threads."
+    ]
+  }
+}

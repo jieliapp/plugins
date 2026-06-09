@@ -1,0 +1,74 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger sessionstart --jieli-hook",
+            "statusMessage": "Syncing Codex session to Jieli"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger userpromptsubmit --jieli-hook",
+            "statusMessage": "Syncing Codex session to Jieli"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger precompact --jieli-hook",
+            "statusMessage": "Syncing Codex session to Jieli"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger postcompact --jieli-hook",
+            "statusMessage": "Syncing Codex session to Jieli"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger stop --jieli-hook",
+            "statusMessage": "Syncing Codex session to Jieli"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/commit_trailer.py\" --jieli-hook",
+            "statusMessage": "Adding Jieli commit trailer"
+          }
+        ]
+      }
+    ]
+  }
+}

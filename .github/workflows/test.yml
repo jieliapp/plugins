@@ -13,3 +13,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 -m unittest plugins/claude-code/tests/test_plugin_scripts.py
+      - run: python3 -m unittest plugins/codex/tests/test_plugin_scripts.py
