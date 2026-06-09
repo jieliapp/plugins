@@ -205,7 +205,7 @@ class CodexSyncScriptTests(unittest.TestCase):
         self.assertEqual(payload["thread"]["messages"][0]["content"], "real request")
         self.assertEqual(payload["thread"]["title"], "real request")
 
-    def test_build_payload_includes_repo_url_from_git_remote(self):
+    def test_build_payload_includes_raw_repo_url_from_git_remote(self):
         from sync import build_payload_from_hook
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -213,7 +213,7 @@ class CodexSyncScriptTests(unittest.TestCase):
             repo.mkdir()
             subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(
-                ["git", "remote", "add", "origin", "git@github.com:jieliapp/plugins.git"],
+                ["git", "remote", "add", "origin", "git@home.pika12.com:guoyb/jieli.git"],
                 cwd=repo,
                 check=True,
                 stdout=subprocess.DEVNULL,
@@ -238,14 +238,8 @@ class CodexSyncScriptTests(unittest.TestCase):
                 base_url="https://jieli.example.test",
             )
 
-        self.assertEqual(payload["repo_url"], "https://github.com/jieliapp/plugins")
-
-    def test_repo_url_from_repository_url_normalizes_supported_remotes(self):
-        from sync import repo_url_from_repository_url
-
-        self.assertEqual(repo_url_from_repository_url("https://github.com/jieliapp/plugins.git"), "https://github.com/jieliapp/plugins")
-        self.assertEqual(repo_url_from_repository_url("git@github.com:jieliapp/plugins.git"), "https://github.com/jieliapp/plugins")
-        self.assertEqual(repo_url_from_repository_url("ssh://git@github.com/jieliapp/plugins.git"), "https://github.com/jieliapp/plugins")
+        self.assertEqual(payload["repo"], "")
+        self.assertEqual(payload["repo_url"], "git@home.pika12.com:guoyb/jieli.git")
 
     def test_find_session_transcript_uses_codex_home_sessions(self):
         from sync import find_session_transcript

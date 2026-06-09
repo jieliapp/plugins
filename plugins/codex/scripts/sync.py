@@ -424,6 +424,8 @@ def codex_session_id(provider_thread_id: str) -> str:
 
 
 def repo_from_cwd(cwd: str) -> str:
+    if repo_url_from_cwd(cwd):
+        return ""
     parts = [part for part in Path(cwd).parts if part not in {"/", ""}]
     if len(parts) >= 2:
         return "/".join(parts[-2:])
@@ -431,70 +433,7 @@ def repo_from_cwd(cwd: str) -> str:
 
 
 def repo_url_from_cwd(cwd: str) -> str:
-    remote = git_config(cwd, "remote.origin.url")
-    return repo_url_from_repository_url(remote)
-
-
-def repo_url_from_repository_url(raw: str) -> str:
-    value = raw.strip().strip("/")
-    if not value:
-        return ""
-    if value.endswith(".git"):
-        value = value[:-4]
-    if value.startswith(("http://", "https://")):
-        return clean_http_repo_url(value)
-    if value.startswith("ssh://"):
-        return repo_url_from_ssh_url(value)
-    return repo_url_from_scp_url(value)
-
-
-def clean_http_repo_url(value: str) -> str:
-    from urllib.parse import urlparse
-
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return ""
-    repo = valid_repo_path(parsed.path)
-    if not repo:
-        return ""
-    return f"{parsed.scheme}://{parsed.netloc}/{repo}"
-
-
-def repo_url_from_ssh_url(value: str) -> str:
-    from urllib.parse import urlparse
-
-    parsed = urlparse(value)
-    if parsed.scheme != "ssh" or not parsed.hostname:
-        return ""
-    repo = valid_repo_path(parsed.path)
-    if not repo:
-        return ""
-    return f"https://{parsed.hostname}/{repo}"
-
-
-def repo_url_from_scp_url(value: str) -> str:
-    if ":" not in value:
-        return ""
-    host_part, path = value.split(":", 1)
-    if "/" in host_part:
-        return ""
-    host = host_part.rsplit("@", 1)[-1]
-    repo = valid_repo_path(path)
-    if not host or not repo:
-        return ""
-    return f"https://{host}/{repo}"
-
-
-def valid_repo_path(raw: str) -> str:
-    path = raw.strip().strip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
-    parts = path.split("/")
-    if len(parts) < 2:
-        return ""
-    if all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts):
-        return "/".join(parts)
-    return ""
+    return git_config(cwd, "remote.origin.url")
 
 
 def timestamp_ms(value: Any) -> int:
