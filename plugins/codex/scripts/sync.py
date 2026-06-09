@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
+import mimetypes
 import os
 import re
 import subprocess
@@ -14,7 +17,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import jieli_config
 from redact import redact_json, redact_text
@@ -28,9 +31,16 @@ TRANSCRIPT_QUIET_SECONDS = 0.25
 TRANSCRIPT_FLUSH_TIMEOUT_SECONDS = 1.5
 TOOL_OUTPUT_MAX_CHARS = 20000
 SESSION_MAPPING_FILE = "codex-sessions.json"
+ATTACHMENT_CACHE_FILE = "codex-attachments.json"
+IMAGE_PLACEHOLDER_RE = re.compile(r"\[Image:\s*source:\s*([^\]]+)\]")
+IMAGE_LABEL_RE = re.compile(r"\[Image\s+#\d+\]")
+SUPPORTED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 COMPACTION_PLACEHOLDER = (
     "[Context compacted - earlier conversation summarized to continue past the context window]"
 )
+
+ImageUploader = Callable[[Path], str]
+DataImageUploader = Callable[[bytes, str], str]
 
 
 def missing_config_vars(environ: Mapping[str, str] | None = None) -> list[str]:
@@ -63,9 +73,19 @@ def load_hook_stdin() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def build_payload_from_hook(hook_data: dict[str, Any], base_url: str | None = None) -> dict[str, Any]:
+def build_payload_from_hook(
+    hook_data: dict[str, Any],
+    base_url: str | None = None,
+    image_uploader: ImageUploader | None = None,
+    data_image_uploader: DataImageUploader | None = None,
+) -> dict[str, Any]:
     transcript_path = resolve_transcript_path(hook_data)
-    transcript = parse_transcript(transcript_path, fallback_session_id=str(hook_data.get("session_id") or ""))
+    transcript = parse_transcript(
+        transcript_path,
+        fallback_session_id=str(hook_data.get("session_id") or ""),
+        image_uploader=image_uploader,
+        data_image_uploader=data_image_uploader,
+    )
     cwd = transcript.get("cwd") or hook_data.get("cwd") or os.getcwd()
     session_id = str(hook_data.get("session_id") or transcript.get("id") or "").strip()
     if not session_id:
@@ -189,7 +209,12 @@ def transcript_has_session_id(path: Path, session_id: str) -> bool:
     return False
 
 
-def parse_transcript(path: Path, fallback_session_id: str = "") -> dict[str, Any]:
+def parse_transcript(
+    path: Path,
+    fallback_session_id: str = "",
+    image_uploader: ImageUploader | None = None,
+    data_image_uploader: DataImageUploader | None = None,
+) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
     session_id = fallback_session_id
     cwd = ""
@@ -227,9 +252,16 @@ def parse_transcript(path: Path, fallback_session_id: str = "") -> dict[str, Any
                 cwd = cwd or str(payload.get("cwd") or "")
                 model = model or str(payload.get("model") or "")
                 continue
+            if entry_type == "event_msg":
+                item = message_from_user_event(payload, line_number, image_uploader)
+                if item is not None and not is_duplicate_user_event(messages, item):
+                    if not title:
+                        title = text_from_content(item.get("content")).strip()[:80]
+                    messages.append(item)
+                continue
             if entry_type != "response_item":
                 continue
-            item = message_from_response_item(payload, line_number)
+            item = message_from_response_item(payload, line_number, image_uploader, data_image_uploader)
             if item is None:
                 continue
             if item.get("role") == "user" and not title:
@@ -248,12 +280,17 @@ def parse_transcript(path: Path, fallback_session_id: str = "") -> dict[str, Any
     }
 
 
-def message_from_response_item(payload: dict[str, Any], line_number: int) -> dict[str, Any] | None:
+def message_from_response_item(
+    payload: dict[str, Any],
+    line_number: int,
+    image_uploader: ImageUploader | None = None,
+    data_image_uploader: DataImageUploader | None = None,
+) -> dict[str, Any] | None:
     item_type = payload.get("type")
     if item_type == "reasoning":
         return None
     if item_type == "message":
-        return normalize_response_message(payload, line_number)
+        return normalize_response_message(payload, line_number, image_uploader, data_image_uploader)
     if item_type == "function_call":
         return normalize_function_call(payload, line_number)
     if item_type == "function_call_output":
@@ -261,11 +298,32 @@ def message_from_response_item(payload: dict[str, Any], line_number: int) -> dic
     return None
 
 
-def normalize_response_message(payload: dict[str, Any], line_number: int) -> dict[str, Any] | None:
+def message_from_user_event(
+    payload: dict[str, Any],
+    line_number: int,
+    image_uploader: ImageUploader | None = None,
+) -> dict[str, Any] | None:
+    if payload.get("type") != "user_message":
+        return None
+    message = payload.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return None
+    content = normalize_user_event_content(message, payload.get("local_images"), image_uploader)
+    if content is None:
+        return None
+    return {"role": "user", "content": content, "message_id": f"user-event-{line_number}"}
+
+
+def normalize_response_message(
+    payload: dict[str, Any],
+    line_number: int,
+    image_uploader: ImageUploader | None = None,
+    data_image_uploader: DataImageUploader | None = None,
+) -> dict[str, Any] | None:
     role = str(payload.get("role") or "")
     if role in {"system", "developer"}:
         return None
-    content = normalize_content_blocks(payload.get("content"), role)
+    content = normalize_content_blocks(payload.get("content"), role, image_uploader, data_image_uploader)
     if content is None:
         return None
     if role == "user" and should_skip_user_message(content):
@@ -281,10 +339,14 @@ def normalize_response_message(payload: dict[str, Any], line_number: int) -> dic
     return item
 
 
-def normalize_content_blocks(raw_content: Any, role: str) -> Any | None:
+def normalize_content_blocks(
+    raw_content: Any,
+    role: str,
+    image_uploader: ImageUploader | None = None,
+    data_image_uploader: DataImageUploader | None = None,
+) -> Any | None:
     if isinstance(raw_content, str):
-        text = redact_text(raw_content).strip()
-        return text or None
+        return normalize_text_with_images(raw_content, image_uploader)
     if not isinstance(raw_content, list):
         if raw_content is None:
             return None
@@ -297,9 +359,21 @@ def normalize_content_blocks(raw_content: Any, role: str) -> Any | None:
         block_type = str(block.get("type") or "")
         text = block.get("text")
         if block_type in {"input_text", "output_text", "text"} and isinstance(text, str):
-            value = redact_text(text).strip()
-            if value:
-                blocks.append({"type": "text", "text": value})
+            append_blocks(blocks, normalize_text_blocks(text, image_uploader))
+            continue
+        if block_type == "input_image":
+            image_block = image_block_from_data_url(str(block.get("image_url") or ""), data_image_uploader)
+            if image_block:
+                blocks.append(image_block)
+            elif not has_existing_image_label(blocks):
+                blocks.append({"type": "text", "text": "[Image unavailable]"})
+            continue
+        if block_type == "image":
+            image_block = image_block_from_path(image_path_from_block(block), image_uploader)
+            if image_block:
+                blocks.append(image_block)
+            elif not has_existing_image_label(blocks):
+                blocks.append({"type": "text", "text": "[Image unavailable]"})
             continue
         if block_type in {"encrypted_content", "reasoning"}:
             continue
@@ -311,6 +385,163 @@ def normalize_content_blocks(raw_content: Any, role: str) -> Any | None:
     if all(block.get("type") == "text" for block in blocks):
         return "\n\n".join(block["text"] for block in blocks if block.get("text"))
     return blocks
+
+
+def normalize_user_event_content(message: str, local_images: Any, image_uploader: ImageUploader | None = None) -> Any | None:
+    blocks = normalize_text_blocks(message, image_uploader)
+    if isinstance(local_images, list):
+        for image_path in local_images:
+            if not isinstance(image_path, str):
+                continue
+            image_block = image_block_from_path(image_path, image_uploader)
+            if image_block:
+                blocks.append(image_block)
+            elif not has_existing_image_label(blocks):
+                blocks.append({"type": "text", "text": "[Image unavailable]"})
+    return collapse_text_only_blocks(blocks)
+
+
+def normalize_text_with_images(text: str, image_uploader: ImageUploader | None = None) -> Any | None:
+    return collapse_text_only_blocks(normalize_text_blocks(text, image_uploader))
+
+
+def normalize_text_blocks(text: str, image_uploader: ImageUploader | None = None) -> list[dict[str, Any]]:
+    stripped = text.strip()
+    if stripped.startswith("<image name=") or stripped == "</image>":
+        return []
+    blocks: list[dict[str, Any]] = []
+    position = 0
+    for match in IMAGE_PLACEHOLDER_RE.finditer(text):
+        append_text_block(blocks, text[position:match.start()])
+        image_block = image_block_from_path(match.group(1), image_uploader)
+        if image_block:
+            blocks.append(image_block)
+        elif not has_existing_image_label(blocks):
+            blocks.append({"type": "text", "text": "[Image unavailable]"})
+        position = match.end()
+    append_text_block(blocks, text[position:])
+    return blocks
+
+
+def append_text_block(blocks: list[dict[str, Any]], text: str) -> None:
+    value = redact_text(text).strip()
+    if value:
+        blocks.append({"type": "text", "text": value})
+
+
+def append_blocks(blocks: list[Any], next_blocks: list[dict[str, Any]]) -> None:
+    blocks.extend(next_blocks)
+
+
+def has_existing_image_label(blocks: list[Any]) -> bool:
+    for block in reversed(blocks):
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and IMAGE_LABEL_RE.search(text):
+            return True
+    return False
+
+
+def collapse_text_only_blocks(blocks: list[Any]) -> Any | None:
+    if not blocks:
+        return None
+    if all(isinstance(block, dict) and block.get("type") == "text" for block in blocks):
+        return "\n\n".join(str(block.get("text", "")) for block in blocks if block.get("text"))
+    return blocks
+
+
+def image_path_from_block(block: dict[str, Any]) -> str:
+    source = block.get("source")
+    if isinstance(source, str):
+        return source
+    if isinstance(source, dict):
+        for key in ("path", "file_path", "sourcePath", "url"):
+            value = source.get(key)
+            if isinstance(value, str) and value.startswith("/"):
+                return value
+    for key in ("sourcePath", "path", "file_path"):
+        value = block.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def image_block_from_path(raw_path: str, image_uploader: ImageUploader | None = None) -> dict[str, Any] | None:
+    if not raw_path or image_uploader is None:
+        return None
+    path = Path(raw_path.strip())
+    media_type = media_type_for_image(path)
+    if not media_type:
+        return None
+    try:
+        url = image_uploader(path)
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+    if not url:
+        return None
+    return {"type": "image", "source": {"url": url, "type": media_type}}
+
+
+def image_block_from_data_url(raw_url: str, data_image_uploader: DataImageUploader | None = None) -> dict[str, Any] | None:
+    if not raw_url.startswith("data:") or data_image_uploader is None:
+        return None
+    parsed = parse_image_data_url(raw_url)
+    if parsed is None:
+        return None
+    media_type, data = parsed
+    try:
+        url = data_image_uploader(data, media_type)
+    except (OSError, ValueError, urllib.error.URLError, KeyError):
+        return None
+    if not url:
+        return None
+    return {"type": "image", "source": {"url": url, "type": media_type}}
+
+
+def parse_image_data_url(raw_url: str) -> tuple[str, bytes] | None:
+    header, separator, encoded = raw_url.partition(",")
+    if not separator or ";base64" not in header:
+        return None
+    media_type = header.removeprefix("data:").split(";", 1)[0].lower()
+    if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+        return None
+    try:
+        return media_type, base64.b64decode(encoded, validate=True)
+    except ValueError:
+        return None
+
+
+def media_type_for_image(path: Path) -> str:
+    media_type, _ = mimetypes.guess_type(path.name)
+    return media_type if media_type in SUPPORTED_IMAGE_MEDIA_TYPES else ""
+
+
+def is_duplicate_user_event(messages: list[dict[str, Any]], item: dict[str, Any]) -> bool:
+    if item.get("role") != "user":
+        return False
+    current = normalized_content_text(item.get("content"))
+    if not current:
+        return False
+    for previous in reversed(messages[-2:]):
+        if previous.get("role") != "user":
+            continue
+        previous_text = normalized_content_text(previous.get("content"))
+        if previous_text == current or previous_text.endswith(current) or current.endswith(previous_text):
+            return True
+    return False
+
+
+def normalized_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"].strip())
+        return "\n\n".join(part for part in parts if part).strip()
+    return ""
 
 
 def should_skip_user_message(content: Any) -> bool:
@@ -506,6 +737,84 @@ def upload_payload(payload: dict[str, Any], base_url: str, api_key: str) -> dict
         return json.loads(response.read().decode("utf-8"))
 
 
+def upload_attachment(path: Path, base_url: str, api_key: str) -> str:
+    media_type = media_type_for_image(path)
+    if not media_type:
+        raise ValueError("unsupported image media type")
+    return upload_attachment_data(path.read_bytes(), media_type, base_url, api_key)
+
+
+def upload_attachment_data(data_bytes: bytes, media_type: str, base_url: str, api_key: str) -> str:
+    if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+        raise ValueError("unsupported image media type")
+    encoded = base64.b64encode(data_bytes).decode("ascii")
+    data = json.dumps({"data": encoded, "mediaType": media_type}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/plugin/attachments",
+        data=data,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    url = body.get("url") if isinstance(body, dict) else ""
+    if not isinstance(url, str) or not url:
+        raise ValueError("attachment upload response missing url")
+    return url
+
+
+def upload_attachment_cached(path: Path, base_url: str, api_key: str, home: Path | None = None) -> str:
+    media_type = media_type_for_image(path)
+    if not media_type:
+        raise ValueError("unsupported image media type")
+    return upload_attachment_data_cached(path.read_bytes(), media_type, base_url, api_key, home=home)
+
+
+def upload_attachment_data_cached(
+    data_bytes: bytes,
+    media_type: str,
+    base_url: str,
+    api_key: str,
+    home: Path | None = None,
+) -> str:
+    if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+        raise ValueError("unsupported image media type")
+    digest = hashlib.sha256(data_bytes).hexdigest()
+    cache_key = "|".join([base_url.rstrip("/"), media_type, digest])
+    cache = load_attachment_cache(home)
+    cached_url = cache.get(cache_key)
+    if isinstance(cached_url, str) and cached_url:
+        return cached_url
+    url = upload_attachment_data(data_bytes, media_type, base_url, api_key)
+    cache[cache_key] = url
+    write_attachment_cache(cache, home)
+    return url
+
+
+def attachment_cache_path(home: Path | None = None) -> Path:
+    return (home or Path.home()) / ".jieli" / ATTACHMENT_CACHE_FILE
+
+
+def load_attachment_cache(home: Path | None = None) -> dict[str, str]:
+    path = attachment_cache_path(home)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): value for key, value in raw.items() if isinstance(value, str) and value}
+
+
+def write_attachment_cache(cache: dict[str, str], home: Path | None = None) -> None:
+    path = attachment_cache_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(cache, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
+    path.chmod(0o600)
+
+
 def format_hook_error(error: BaseException) -> str:
     message = f"{type(error).__name__}: {error}"
     if isinstance(error, urllib.error.HTTPError):
@@ -632,7 +941,12 @@ def main() -> int:
                 wait_for_transcript_flush(Path(transcript_path))
             base_url = jieli_config.get_base_url().rstrip("/")
             api_key = required_env("JIELI_API_KEY")
-            payload = build_payload_from_hook(hook_data, base_url=base_url)
+            payload = build_payload_from_hook(
+                hook_data,
+                base_url=base_url,
+                image_uploader=lambda path: upload_attachment_cached(path, base_url, api_key),
+                data_image_uploader=lambda data, media_type: upload_attachment_data_cached(data, media_type, base_url, api_key),
+            )
             upload_payload(payload, base_url, api_key)
             provider_thread_id = payload["thread"]["id"]
             write_session_mapping(

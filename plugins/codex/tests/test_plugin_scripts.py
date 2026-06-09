@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import os
@@ -240,6 +241,122 @@ class CodexSyncScriptTests(unittest.TestCase):
 
         self.assertEqual(payload["repo"], "")
         self.assertEqual(payload["repo_url"], "git@home.pika12.com:guoyb/jieli.git")
+
+    def test_build_payload_uploads_codex_input_image_data_urls(self):
+        from sync import build_payload_from_hook
+
+        uploaded: list[tuple[bytes, str]] = []
+        image_data = b"\x89PNG\r\n\x1a\n\x00\x00"
+        image_url = "data:image/png;base64," + base64.b64encode(image_data).decode("ascii")
+
+        def fake_upload(data: bytes, media_type: str) -> str:
+            uploaded.append((data, media_type))
+            return "https://jieli.example.test/attachments/img.png"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps({"type": "session_meta", "payload": {"id": "codex-image-data", "cwd": "/Users/alice/work/jieli"}})
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "<image name=[Image #1]>"},
+                                {"type": "input_image", "image_url": image_url, "detail": "high"},
+                                {"type": "input_text", "text": "</image>"},
+                                {"type": "input_text", "text": "[Image #1] what is this?"},
+                            ],
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "codex-image-data", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+                image_uploader=lambda path: "unused",
+                data_image_uploader=fake_upload,
+            )
+
+        self.assertEqual(uploaded, [(image_data, "image/png")])
+        self.assertEqual(
+            payload["thread"]["messages"][0]["content"],
+            [
+                {"type": "image", "source": {"url": "https://jieli.example.test/attachments/img.png", "type": "image/png"}},
+                {"type": "text", "text": "[Image #1] what is this?"},
+            ],
+        )
+
+    def test_build_payload_uploads_codex_local_image_events_when_response_item_is_missing(self):
+        from sync import build_payload_from_hook
+
+        uploaded_paths: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = Path(tmpdir) / "1.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00")
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps({"type": "session_meta", "payload": {"id": "codex-local-image", "cwd": "/Users/alice/work/jieli"}})
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "user_message",
+                            "message": "ok [Image #1] what is this?",
+                            "images": [],
+                            "local_images": [str(image_path)],
+                            "text_elements": [{"placeholder": "[Image #1]"}],
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "codex-local-image", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+                image_uploader=lambda path: uploaded_paths.append(str(path)) or "https://jieli.example.test/attachments/img.png",
+            )
+
+        self.assertEqual(uploaded_paths, [str(image_path)])
+        self.assertEqual(
+            payload["thread"]["messages"][0]["content"],
+            [
+                {"type": "text", "text": "ok [Image #1] what is this?"},
+                {"type": "image", "source": {"url": "https://jieli.example.test/attachments/img.png", "type": "image/png"}},
+            ],
+        )
+
+    def test_upload_attachment_cached_reuses_successful_upload_by_content_hash(self):
+        import sync
+
+        calls: list[tuple[bytes, str]] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir) / "home"
+            image_path = Path(tmpdir) / "1.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00")
+            original_upload = sync.upload_attachment_data
+
+            try:
+                sync.upload_attachment_data = lambda data, media_type, base_url, api_key: calls.append((data, media_type)) or "https://jieli.example.test/attachments/img.png"
+                first = sync.upload_attachment_cached(image_path, "https://jieli.example.test/", "secret", home=home)
+                second = sync.upload_attachment_cached(image_path, "https://jieli.example.test/", "secret", home=home)
+            finally:
+                sync.upload_attachment_data = original_upload
+
+        self.assertEqual(first, "https://jieli.example.test/attachments/img.png")
+        self.assertEqual(second, "https://jieli.example.test/attachments/img.png")
+        self.assertEqual(calls, [(b"\x89PNG\r\n\x1a\n\x00\x00", "image/png")])
 
     def test_find_session_transcript_uses_codex_home_sessions(self):
         from sync import find_session_transcript
