@@ -240,6 +240,7 @@ class SyncScriptTests(unittest.TestCase):
         self.assertEqual(payload["provider"], "claude_code")
         self.assertEqual(payload["labels"], [])
         self.assertEqual(payload["repo"], "")
+        self.assertEqual(payload["repo_url"], "")
         self.assertEqual(payload["branch"], "plugin/sync")
         self.assertEqual(payload["source_url"], "https://jieli.example.test/threads/T-cc-1")
         self.assertEqual(payload["thread"]["id"], "T-cc-1")
@@ -255,15 +256,15 @@ class SyncScriptTests(unittest.TestCase):
         self.assertNotIn("abc.def.ghi", raw_payload)
         self.assertNotIn("tool.secret", raw_payload)
 
-    def test_build_payload_uses_git_remote_repo_slug(self):
+    def test_build_payload_includes_raw_repo_url_from_git_remote(self):
         from sync import build_payload_from_hook
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "github" / "plugins"
+            repo = Path(tmpdir) / "repo"
             repo.mkdir(parents=True)
             subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(
-                ["git", "remote", "add", "origin", "git@github.com:jieliapp/plugins.git"],
+                ["git", "remote", "add", "origin", "git@home.pika12.com:guoyb/jieli.git"],
                 cwd=repo,
                 check=True,
                 stdout=subprocess.DEVNULL,
@@ -291,9 +292,10 @@ class SyncScriptTests(unittest.TestCase):
                 base_url="https://jieli.example.test",
             )
 
-        self.assertEqual(payload["repo"], "jieliapp/plugins")
+        self.assertEqual(payload["repo"], "")
+        self.assertEqual(payload["repo_url"], "git@home.pika12.com:guoyb/jieli.git")
 
-    def test_build_payload_leaves_repo_empty_without_github_remote(self):
+    def test_build_payload_leaves_repo_metadata_empty_without_git_remote(self):
         from sync import build_payload_from_hook
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -322,6 +324,7 @@ class SyncScriptTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["repo"], "")
+        self.assertEqual(payload["repo_url"], "")
 
     def test_build_payload_uploads_structured_image_blocks(self):
         from sync import build_payload_from_hook

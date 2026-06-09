@@ -109,7 +109,8 @@ def build_payload_from_hook(hook_data: dict[str, Any], base_url: str | None = No
         thread_payload["resolved_model"] = resolved_model
     return {
         "provider": PROVIDER,
-        "repo": repo_from_cwd(cwd),
+        "repo": "",
+        "repo_url": repo_url_from_cwd(cwd),
         "branch": branch,
         "source_url": source_url,
         "labels": [],
@@ -545,7 +546,7 @@ def title_from_messages(messages: list[dict[str, Any]]) -> str:
     return "Claude Code session"
 
 
-def repo_from_cwd(cwd: str) -> str:
+def repo_url_from_cwd(cwd: str) -> str:
     try:
         result = subprocess.run(
             ["git", "config", "--get", "remote.origin.url"],
@@ -558,34 +559,7 @@ def repo_from_cwd(cwd: str) -> str:
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
-    if result.returncode != 0:
-        return ""
-    return repo_from_repository_url(result.stdout)
-
-
-def repo_from_repository_url(raw: str) -> str:
-    value = raw.strip().rstrip("/")
-    if value.endswith(".git"):
-        value = value[:-4]
-    prefixes = (
-        "https://github.com/",
-        "http://github.com/",
-        "git@github.com:",
-        "ssh://git@github.com/",
-    )
-    for prefix in prefixes:
-        if value.startswith(prefix):
-            return valid_github_repo_slug(value[len(prefix) :])
-    return ""
-
-
-def valid_github_repo_slug(value: str) -> str:
-    parts = value.split("/")
-    if len(parts) != 2:
-        return ""
-    if all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts):
-        return value
-    return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def timestamp_ms(value: Any) -> int:
