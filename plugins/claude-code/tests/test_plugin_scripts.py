@@ -1394,6 +1394,16 @@ class ReadThreadScriptTests(unittest.TestCase):
         self.assertNotIn("line 1", limited)
         self.assertNotIn("line 4", limited)
 
+    def test_default_output_limit_keeps_first_read_small(self):
+        from read_thread import DEFAULT_MAX_CHARS, limit_output
+
+        content = "x" * (DEFAULT_MAX_CHARS + 1)
+
+        limited = limit_output(content)
+
+        self.assertEqual(DEFAULT_MAX_CHARS, 12000)
+        self.assertIn("[Content truncated at 12000 chars", limited)
+
     def test_read_thread_main_defaults_to_jieli_app_base_url(self):
         from read_thread import main
 
@@ -1597,6 +1607,21 @@ class CommitTrailerTests(unittest.TestCase):
 
 
 class PluginManifestTests(unittest.TestCase):
+    def test_bin_read_thread_wrapper_resolves_plugin_root_without_env(self):
+        wrapper = PLUGIN_ROOT / "bin" / "jieli-read-thread"
+
+        result = subprocess.run(
+            [str(wrapper), "--help"],
+            env={},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Read a Jieli thread export.", result.stdout)
+
     def test_standard_hooks_file_is_not_duplicated_in_manifest(self):
         manifest = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertNotIn("hooks", manifest)

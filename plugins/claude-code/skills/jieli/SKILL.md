@@ -24,6 +24,8 @@ Do not use this skill for the current conversation when the needed context is al
 
 ## Environment
 
+Use the `jieli-read-thread` command for thread reads. It is installed from the plugin `bin/` directory and resolves the plugin scripts path itself. Do not call `python3 "$CLAUDE_PLUGIN_ROOT/scripts/read_thread.py"` from Bash, and do not guess cache paths such as `skills/jieli/scripts/read_thread.py`.
+
 Prefer these shell variables in examples:
 
 ```bash
@@ -50,24 +52,25 @@ For self-hosted Jieli, also set `JIELI_BASE_URL` to the deployment URL.
 1. Resolve the thread id from the URL path or use the raw id. Strip a trailing `.md` or `.json` extension from the last path segment.
 2. Pass only the provider thread id to the helper script. Do not pass `/threads/<thread_id>`, a full URL, `.md`, or `.json` to the script.
 3. Treat a plain page/share URL such as `/threads/<thread_id>` as a reference to the same thread. The helper reads the agent-friendly markdown export at `/threads/<thread_id>.md`.
-4. Start with a bounded read to avoid loading the whole transcript into context:
+4. Start with a small bounded read for the main content. Do not pull the whole transcript on the first pass:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/scripts/read_thread.py" "<thread_id>" --truncate-tool-results --max-chars 20000
+jieli-read-thread "<thread_id>" --truncate-tool-results --max-chars 12000
 ```
 
-5. For focused follow-up reads, use 1-based inclusive line ranges:
+5. Only when details are missing, do focused follow-up reads with 1-based inclusive line ranges:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/scripts/read_thread.py" "<thread_id>" --truncate-tool-results --start-line 120 --end-line 220 --max-chars 20000
+jieli-read-thread "<thread_id>" --truncate-tool-results --start-line 120 --end-line 220 --max-chars 12000
 ```
 
 6. Treat the markdown response as the canonical readable thread source. Answer the user's specific question first; do not paste the full transcript unless explicitly requested.
 7. Use `--truncate-tool-results` for the first pass on long threads. This keeps the transcript readable by shortening verbose tool outputs.
 8. The helper still applies local `--max-chars`, `--start-line`, and `--end-line` limits.
-9. If full tool outputs are needed, rerun without `--truncate-tool-results`, preferably with a focused line range.
-10. If structured JSON fields are required, call the helper with `--format json` and the same local output limits.
-11. If the helper fails, report that the thread could not be loaded and include the non-secret error message.
+9. Avoid first-pass reads such as `--max-chars 30000` or `--max-chars 80000` unless the user explicitly asks for a full transcript. For "main points" or "what happened" requests, prefer the small first read plus line-range follow-ups.
+10. If full tool outputs are needed, rerun without `--truncate-tool-results`, preferably with a focused line range.
+11. If structured JSON fields are required, call the helper with `--format json` and the same local output limits.
+12. If the helper fails, report that the thread could not be loaded and include the non-secret error message.
 
 ## Search Procedure
 

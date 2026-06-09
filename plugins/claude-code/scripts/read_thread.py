@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 
 
-DEFAULT_MAX_CHARS = 20000
+DEFAULT_MAX_CHARS = 12000
 DEFAULT_BASE_URL = "https://jieli.app"
 EXPORT_TIMEOUT_SECONDS = 20
 
