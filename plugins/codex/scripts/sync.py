@@ -35,6 +35,8 @@ ATTACHMENT_CACHE_FILE = "codex-attachments.json"
 IMAGE_PLACEHOLDER_RE = re.compile(r"\[Image:\s*source:\s*([^\]]+)\]")
 IMAGE_LABEL_RE = re.compile(r"\[Image\s+#\d+\]")
 LOCAL_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((/[^)\n]+)\)")
+HANDOFF_SUMMARY_RE = re.compile(r"^(?:#{1,6}\s*)?\*{0,2}Handoff Summary\*{0,2}\s*(?:\n|$)", re.IGNORECASE)
+CODEX_GIT_DIRECTIVE_RE = re.compile(r"(?m)^[ \t]*::git-[A-Za-z0-9_-]+\{[^\n]*\}[ \t]*\n?")
 SUPPORTED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 COMPACTION_PLACEHOLDER = (
     "[Context compacted - earlier conversation summarized to continue past the context window]"
@@ -331,6 +333,8 @@ def normalize_response_message(
     content = normalize_content_blocks(payload.get("content"), role, image_uploader, data_image_uploader)
     if content is None:
         return None
+    if is_handoff_summary_text(text_from_content(content)):
+        content = COMPACTION_PLACEHOLDER
     if role == "user" and should_skip_user_message(content):
         return None
     item: dict[str, Any] = {
@@ -429,7 +433,7 @@ def normalize_text_blocks(text: str, image_uploader: ImageUploader | None = None
 
 
 def append_text_block(blocks: list[dict[str, Any]], text: str) -> None:
-    value = redact_text(file_url_local_markdown_link_targets(text)).strip()
+    value = clean_codex_text(redact_text(file_url_local_markdown_link_targets(text))).strip()
     if value:
         blocks.append({"type": "text", "text": value})
 
@@ -562,6 +566,15 @@ def should_skip_user_message(content: Any) -> bool:
     return any(text.startswith(prefix) for prefix in skipped_prefixes)
 
 
+def is_handoff_summary_text(text: str) -> bool:
+    return bool(HANDOFF_SUMMARY_RE.match(text.lstrip()))
+
+
+def clean_codex_text(text: str) -> str:
+    cleaned = CODEX_GIT_DIRECTIVE_RE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", cleaned)
+
+
 def file_url_local_markdown_link_targets(text: str) -> str:
     def replace(match: re.Match[str]) -> str:
         label = match.group(1).strip()
@@ -578,6 +591,7 @@ def normalize_function_call(payload: dict[str, Any], line_number: int) -> dict[s
     name = str(payload.get("name") or "")
     if not name:
         return None
+    input_value = parse_tool_arguments(payload.get("arguments"))
     return {
         "role": "assistant",
         "message_id": call_id,
@@ -585,8 +599,8 @@ def normalize_function_call(payload: dict[str, Any], line_number: int) -> dict[s
             {
                 "type": "tool_use",
                 "id": call_id,
-                "name": name,
-                "input": parse_tool_arguments(payload.get("arguments")),
+                "name": normalize_tool_name(name),
+                "input": normalize_tool_input(name, input_value),
             }
         ],
     }
@@ -620,6 +634,7 @@ def normalize_function_output(payload: dict[str, Any], line_number: int) -> dict
         content = truncate_tool_output(redact_text(output))
     else:
         content = redact_json(output)
+    exit_code = exit_code_from_tool_output(content)
     return {
         "role": "tool",
         "message_id": call_id,
@@ -628,6 +643,13 @@ def normalize_function_output(payload: dict[str, Any], line_number: int) -> dict
                 "type": "tool_result",
                 "tool_use_id": call_id,
                 "content": content,
+                "run": {
+                    "status": "completed",
+                    "result": {
+                        "output": content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
+                        "exitCode": exit_code,
+                    },
+                },
             }
         ],
     }
@@ -650,6 +672,30 @@ def parse_custom_tool_input(name: str, value: Any) -> Any:
             return {"patch_text": text}
         return {"input": text}
     return redact_json(value)
+
+
+def normalize_tool_name(name: str) -> str:
+    if name.strip().lower() == "exec_command":
+        return "shell_command"
+    return name
+
+
+def normalize_tool_input(name: str, input_value: Any) -> Any:
+    if name.strip().lower() != "exec_command" or not isinstance(input_value, dict):
+        return input_value
+    command = input_value.get("cmd")
+    cwd = input_value.get("workdir")
+    return {
+        "command": command if isinstance(command, str) else "",
+        "cwd": cwd if isinstance(cwd, str) else "",
+    }
+
+
+def exit_code_from_tool_output(output: Any) -> int | None:
+    if not isinstance(output, str):
+        return None
+    match = re.search(r"(?:Process exited with code|Exit code:)\s*(-?\d+)", output)
+    return int(match.group(1)) if match else None
 
 
 def truncate_tool_output(text: str, max_chars: int = TOOL_OUTPUT_MAX_CHARS) -> str:

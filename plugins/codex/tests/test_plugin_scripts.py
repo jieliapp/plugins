@@ -145,14 +145,19 @@ class CodexSyncScriptTests(unittest.TestCase):
         self.assertEqual(payload["thread"]["model"], "gpt-5.5")
         self.assertEqual(payload["thread"]["title"], "sync OPENAI_API_KEY=[REDACTED:openai-api-key]")
         self.assertEqual([message["role"] for message in payload["thread"]["messages"]], ["user", "assistant", "assistant", "tool"])
-        self.assertEqual(payload["thread"]["messages"][2]["content"][0]["type"], "tool_use")
-        self.assertEqual(payload["thread"]["messages"][2]["content"][0]["input"]["token"], "[REDACTED:token]")
-        self.assertEqual(payload["thread"]["messages"][3]["content"][0]["type"], "tool_result")
+        tool_use = payload["thread"]["messages"][2]["content"][0]
+        self.assertEqual(tool_use["type"], "tool_use")
+        self.assertEqual(tool_use["name"], "shell_command")
+        self.assertEqual(tool_use["input"], {"command": "git status", "cwd": ""})
+        tool_result = payload["thread"]["messages"][3]["content"][0]
+        self.assertEqual(tool_result["type"], "tool_result")
+        self.assertEqual(tool_result["run"]["result"]["output"], "Authorization: Bearer [REDACTED:authorization-bearer]")
         raw_payload = json.dumps(payload, sort_keys=True)
         self.assertIn("[REDACTED:", raw_payload)
         self.assertNotIn("sk-ant-secret-value", raw_payload)
         self.assertNotIn("abc.def.ghi", raw_payload)
         self.assertNotIn("tool.secret", raw_payload)
+        self.assertNotIn("tool-secret", raw_payload)
         self.assertNotIn("developer instructions", raw_payload)
         self.assertNotIn("private reasoning", raw_payload)
         self.assertNotIn("encrypted", raw_payload)
@@ -231,6 +236,146 @@ class CodexSyncScriptTests(unittest.TestCase):
         self.assertEqual(tool_result["type"], "tool_result")
         self.assertEqual(tool_result["tool_use_id"], "call-patch")
         self.assertIn("Success. Updated route_test.go", tool_result["content"])
+
+    def test_build_payload_replaces_handoff_summary_with_placeholder(self):
+        from sync import COMPACTION_PLACEHOLDER, build_payload_from_hook
+
+        long_summary = "**Handoff Summary**\n\n**Current task**\n" + "do not upload this summary\n" * 500
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"type": "session_meta", "payload": {"id": "codex-compact", "cwd": "/Users/alice/work/jieli"}}),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "payload": {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": "原始第一条消息"}],
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "payload": {
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [{"type": "output_text", "text": long_summary}],
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "codex-compact", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+            )
+
+        messages = payload["thread"]["messages"]
+        self.assertEqual(messages[1]["content"], COMPACTION_PLACEHOLDER)
+        self.assertEqual(payload["thread"]["title"], "原始第一条消息")
+        self.assertNotIn("do not upload this summary", json.dumps(payload, ensure_ascii=False))
+
+    def test_build_payload_hides_codex_git_directives(self):
+        from sync import build_payload_from_hook
+
+        final_text = """已提交：`abc1234 fix sync`
+
+::git-stage{cwd="/Users/alice/work/jieli"}
+::git-commit{cwd="/Users/alice/work/jieli"}
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps({"type": "session_meta", "payload": {"id": "codex-git-directives", "cwd": "/Users/alice/work/jieli"}})
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": final_text}],
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "codex-git-directives", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+            )
+
+        content = payload["thread"]["messages"][0]["content"]
+        self.assertEqual(content, "已提交：`abc1234 fix sync`")
+        self.assertNotIn("::git-stage", json.dumps(payload, ensure_ascii=False))
+        self.assertNotIn("::git-commit", json.dumps(payload, ensure_ascii=False))
+
+    def test_build_payload_maps_exec_command_to_terminal_tool_shape(self):
+        from sync import build_payload_from_hook
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"type": "session_meta", "payload": {"id": "codex-terminal", "cwd": "/Users/alice/work/jieli"}}),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "payload": {
+                                    "type": "function_call",
+                                    "call_id": "call-terminal",
+                                    "name": "exec_command",
+                                    "arguments": json.dumps(
+                                        {
+                                            "cmd": "git status --short --branch",
+                                            "workdir": "/Users/alice/work/jieli",
+                                            "yield_time_ms": 10000,
+                                            "max_output_tokens": 4000,
+                                        }
+                                    ),
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "payload": {
+                                    "type": "function_call_output",
+                                    "call_id": "call-terminal",
+                                    "output": "Chunk ID: abc\nProcess exited with code 0\nOutput:\n## main\n",
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "codex-terminal", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+            )
+
+        tool_use = payload["thread"]["messages"][0]["content"][0]
+        self.assertEqual(tool_use["name"], "shell_command")
+        self.assertEqual(tool_use["input"], {"command": "git status --short --branch", "cwd": "/Users/alice/work/jieli"})
+        tool_result = payload["thread"]["messages"][1]["content"][0]
+        self.assertEqual(tool_result["content"], "Chunk ID: abc\nProcess exited with code 0\nOutput:\n## main\n")
+        self.assertEqual(tool_result["run"]["status"], "completed")
+        self.assertEqual(tool_result["run"]["result"]["exitCode"], 0)
+        self.assertEqual(tool_result["run"]["result"]["output"], "Chunk ID: abc\nProcess exited with code 0\nOutput:\n## main\n")
 
     def test_build_payload_skips_codex_internal_context_messages(self):
         from sync import build_payload_from_hook
