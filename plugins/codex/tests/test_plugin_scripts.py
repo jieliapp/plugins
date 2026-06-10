@@ -586,6 +586,49 @@ Do not upload this loaded skill body.
         self.assertNotIn("Spec-Driven Planning", raw_payload)
         self.assertNotIn("SKILL.md", raw_payload)
 
+    def test_build_payload_strips_codex_user_file_mentions_prefix(self):
+        from sync import build_payload_from_hook
+
+        user_text = """# Files mentioned by the user:
+
+## codex-clipboard-ba43ae37-fd1b-46d2-98dc-a3f3e3c14b3e.png: /var/folders/2s/q99hddf140l937t46th4b91w0000gn/T/codex-clipboard-ba43ae37-fd1b-46d2-98dc-a3f3e3c14b3e.png
+
+## My request for Codex:
+threads list, hidden branch name, just show repo"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"type": "session_meta", "payload": {"id": "codex-file-prefix", "cwd": "/Users/alice/work/jieli"}}),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "payload": {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": user_text}],
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {"session_id": "codex-file-prefix", "transcript_path": str(transcript)},
+                base_url="https://jieli.example.test",
+            )
+
+        raw_payload = json.dumps(payload, ensure_ascii=False)
+        self.assertEqual(payload["thread"]["messages"][0]["content"], "threads list, hidden branch name, just show repo")
+        self.assertEqual(payload["thread"]["title"], "threads list, hidden branch name, just show repo")
+        self.assertNotIn("Files mentioned by the user", raw_payload)
+        self.assertNotIn("codex-clipboard-ba43ae37", raw_payload)
+        self.assertNotIn("/var/folders/", raw_payload)
+
     def test_build_payload_rewrites_local_markdown_link_targets_as_file_urls(self):
         from sync import build_payload_from_hook
 

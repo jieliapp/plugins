@@ -37,6 +37,10 @@ IMAGE_LABEL_RE = re.compile(r"\[Image\s+#\d+\]")
 LOCAL_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((/[^)\n]+)\)")
 HANDOFF_SUMMARY_RE = re.compile(r"^(?:#{1,6}\s*)?\*{0,2}Handoff Summary\*{0,2}\s*(?:\n|$)", re.IGNORECASE)
 CODEX_GIT_DIRECTIVE_RE = re.compile(r"(?m)^[ \t]*::git-[A-Za-z0-9_-]+\{[^\n]*\}[ \t]*\n?")
+CODEX_USER_FILE_MENTIONS_RE = re.compile(
+    r"\A\s*#{0,6}\s*Files mentioned by the user:\s*\n.*?^\s*#{0,6}\s*My request for Codex:\s*\n?",
+    re.DOTALL | re.MULTILINE,
+)
 SUPPORTED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 COMPACTION_PLACEHOLDER = (
     "[Context compacted - earlier conversation summarized to continue past the context window]"
@@ -355,6 +359,8 @@ def normalize_content_blocks(
     data_image_uploader: DataImageUploader | None = None,
 ) -> Any | None:
     if isinstance(raw_content, str):
+        if role == "user":
+            raw_content = clean_codex_user_text(raw_content)
         return normalize_text_with_images(raw_content, image_uploader)
     if not isinstance(raw_content, list):
         if raw_content is None:
@@ -368,6 +374,8 @@ def normalize_content_blocks(
         block_type = str(block.get("type") or "")
         text = block.get("text")
         if block_type in {"input_text", "output_text", "text"} and isinstance(text, str):
+            if role == "user":
+                text = clean_codex_user_text(text)
             append_blocks(blocks, normalize_text_blocks(text, image_uploader))
             continue
         if block_type == "input_image":
@@ -397,7 +405,7 @@ def normalize_content_blocks(
 
 
 def normalize_user_event_content(message: str, local_images: Any, image_uploader: ImageUploader | None = None) -> Any | None:
-    blocks = normalize_text_blocks(message, image_uploader)
+    blocks = normalize_text_blocks(clean_codex_user_text(message), image_uploader)
     if isinstance(local_images, list):
         for image_path in local_images:
             if not isinstance(image_path, str):
@@ -573,6 +581,10 @@ def is_handoff_summary_text(text: str) -> bool:
 def clean_codex_text(text: str) -> str:
     cleaned = CODEX_GIT_DIRECTIVE_RE.sub("", text)
     return re.sub(r"\n{3,}", "\n\n", cleaned)
+
+
+def clean_codex_user_text(text: str) -> str:
+    return clean_codex_text(CODEX_USER_FILE_MENTIONS_RE.sub("", text, count=1))
 
 
 def file_url_local_markdown_link_targets(text: str) -> str:
