@@ -11,17 +11,6 @@
         ]
       }
     ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger userpromptsubmit --jieli-hook"
-          }
-        ]
-      }
-    ],
     "PreCompact": [
       {
         "matcher": "",
@@ -68,4 +57,3 @@
     ]
   }
 }
-

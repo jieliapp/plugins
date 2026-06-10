@@ -27,6 +27,7 @@ PROVIDER = "codex"
 DEFAULT_BASE_URL = jieli_config.DEFAULT_BASE_URL
 LOCK_TTL_SECONDS = 60
 TRANSCRIPT_FLUSH_TRIGGERS = {"stop", "precompact", "postcompact"}
+MISSING_CONFIG_NOTICE_TRIGGERS = {"stop", "precompact", "postcompact"}
 TRANSCRIPT_QUIET_SECONDS = 0.25
 TRANSCRIPT_FLUSH_TIMEOUT_SECONDS = 1.5
 TOOL_OUTPUT_MAX_CHARS = 20000
@@ -51,11 +52,11 @@ DataImageUploader = Callable[[bytes, str], str]
 
 
 def missing_config_vars(environ: Mapping[str, str] | None = None) -> list[str]:
-    return [] if jieli_config.get_api_key(environ) else ["JIELI_API_KEY or ~/.jieli/settings.json api_key"]
+    return [] if jieli_config.get_api_key(environ) else ["JIELI_API_KEY or ~/.config/jieli/settings.json api_key"]
 
 
 def build_missing_config_hook_response(trigger: str, missing: list[str]) -> dict[str, Any]:
-    if trigger.lower() != "userpromptsubmit" or not missing:
+    if trigger.lower() not in MISSING_CONFIG_NOTICE_TRIGGERS or not missing:
         return {}
     missing_text = ", ".join(missing)
     return {
@@ -65,7 +66,7 @@ def build_missing_config_hook_response(trigger: str, missing: list[str]) -> dict
             f"Missing: {missing_text}. "
             f"Go to {DEFAULT_BASE_URL}, register or sign in, create an API key. "
             "Then either set JIELI_API_KEY before starting Codex, or ask the agent to write "
-            "`~/.jieli/settings.json` with `{\"api_key\":\"<key>\",\"base_url\":\"https://jieli.app\"}` "
+            "`~/.config/jieli/settings.json` with `{\"api_key\":\"<key>\",\"base_url\":\"https://jieli.app\"}` "
             "and chmod it to 600. "
             "Sync will stay disabled until configured."
         ),
@@ -94,7 +95,7 @@ def build_payload_from_hook(
         data_image_uploader=data_image_uploader,
     )
     cwd = transcript.get("cwd") or hook_data.get("cwd") or os.getcwd()
-    session_id = str(hook_data.get("session_id") or transcript.get("id") or "").strip()
+    session_id = str(transcript.get("id") or hook_data.get("session_id") or "").strip()
     if not session_id:
         raise ValueError("session_id is required")
 
@@ -223,7 +224,7 @@ def parse_transcript(
     data_image_uploader: DataImageUploader | None = None,
 ) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
-    session_id = fallback_session_id
+    session_id = ""
     cwd = ""
     branch = ""
     model = ""
@@ -276,7 +277,7 @@ def parse_transcript(
             messages.append(item)
 
     return {
-        "id": session_id,
+        "id": session_id or fallback_session_id,
         "cwd": cwd,
         "branch": branch,
         "model": model,

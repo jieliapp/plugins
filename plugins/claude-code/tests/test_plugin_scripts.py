@@ -12,10 +12,27 @@ from unittest.mock import patch
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
+PLUGIN_SCRIPTS = str(PLUGIN_ROOT / "scripts")
+SCRIPT_MODULES = ("sync", "commit_trailer", "read_thread", "redact")
 
 
-class SyncScriptTests(unittest.TestCase):
+def use_plugin_scripts() -> None:
+    for module_name in SCRIPT_MODULES:
+        sys.modules.pop(module_name, None)
+    if PLUGIN_SCRIPTS in sys.path:
+        sys.path.remove(PLUGIN_SCRIPTS)
+    sys.path.insert(0, PLUGIN_SCRIPTS)
+
+
+use_plugin_scripts()
+
+
+class PluginScriptTestCase(unittest.TestCase):
+    def setUp(self):
+        use_plugin_scripts()
+
+
+class SyncScriptTests(PluginScriptTestCase):
     def test_redact_text_removes_standalone_api_keys(self):
         from redact import redact_text
 
@@ -1005,10 +1022,10 @@ class SyncScriptTests(unittest.TestCase):
             self.assertEqual(transcript.read_text(encoding="utf-8"), "first\nsecond\n")
             writer.join(timeout=1)
 
-    def test_missing_config_response_is_visible_on_user_prompt_submit(self):
+    def test_missing_config_response_is_visible_on_stop(self):
         from sync import build_missing_config_hook_response
 
-        response = build_missing_config_hook_response("userpromptsubmit", ["JIELI_API_KEY"])
+        response = build_missing_config_hook_response("stop", ["JIELI_API_KEY"])
 
         self.assertTrue(response["continue"])
         self.assertIn("systemMessage", response)
@@ -1019,11 +1036,15 @@ class SyncScriptTests(unittest.TestCase):
         self.assertNotIn("JIELI_BASE_URL", response["systemMessage"])
         self.assertNotIn("self-hosted", response["systemMessage"])
 
-    def test_missing_config_response_is_quiet_on_non_prompt_hooks(self):
+    def test_missing_config_response_is_quiet_without_missing_config(self):
         from sync import build_missing_config_hook_response
 
-        self.assertEqual(build_missing_config_hook_response("stop", ["JIELI_API_KEY"]), {})
         self.assertEqual(build_missing_config_hook_response("userpromptsubmit", []), {})
+
+    def test_missing_config_response_is_quiet_on_user_prompt_submit(self):
+        from sync import build_missing_config_hook_response
+
+        self.assertEqual(build_missing_config_hook_response("userpromptsubmit", ["JIELI_API_KEY"]), {})
 
     def test_missing_config_uses_default_base_url_and_accepts_plugin_api_key(self):
         from sync import build_payload_from_hook, missing_config_vars
@@ -1050,7 +1071,7 @@ class SyncScriptTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=Path(tmpdir)):
                 payload = build_payload_from_hook(
                     {
                         "session_id": "cc-default-url",
@@ -1060,6 +1081,58 @@ class SyncScriptTests(unittest.TestCase):
                 )
 
         self.assertEqual(payload["source_url"], "https://jieli.app/threads/T-cc-default-url")
+
+    def test_settings_file_satisfies_missing_config_and_base_url(self):
+        from sync import build_payload_from_hook, missing_config_vars, optional_env, required_env
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            settings_path = home / ".config" / "jieli" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"api_key": "jieli-settings-key", "base_url": "https://jieli.example.test"}),
+                encoding="utf-8",
+            )
+            transcript = Path(tmpdir) / "session.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "uuid": "u-settings",
+                        "sessionId": "cc-settings",
+                        "message": {"role": "user", "content": "hello"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.object(Path, "home", return_value=home), patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(missing_config_vars({}), [])
+                self.assertEqual(required_env("JIELI_API_KEY", "CLAUDE_PLUGIN_OPTION_API_KEY"), "jieli-settings-key")
+                self.assertEqual(optional_env("JIELI_BASE_URL", "CLAUDE_PLUGIN_OPTION_BASE_URL"), "https://jieli.example.test")
+                payload = build_payload_from_hook({"session_id": "cc-settings", "transcript_path": str(transcript)})
+
+        self.assertEqual(payload["source_url"], "https://jieli.example.test/threads/T-cc-settings")
+
+    def test_environment_overrides_settings_file(self):
+        from sync import optional_env, required_env
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            settings_path = home / ".config" / "jieli" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"api_key": "settings-key", "base_url": "https://settings.example.test"}),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(Path, "home", return_value=home),
+                patch.dict(os.environ, {"JIELI_API_KEY": "env-key", "JIELI_BASE_URL": "https://env.example.test/"}, clear=True),
+            ):
+                self.assertEqual(required_env("JIELI_API_KEY", "CLAUDE_PLUGIN_OPTION_API_KEY"), "env-key")
+                self.assertEqual(optional_env("JIELI_BASE_URL", "CLAUDE_PLUGIN_OPTION_BASE_URL"), "https://env.example.test/")
 
     def test_upload_payload_posts_to_plugin_endpoint(self):
         from sync import upload_payload
@@ -1371,7 +1444,7 @@ class SyncScriptTests(unittest.TestCase):
         self.assertNotIn("```console", payload["thread"]["messages"][0]["content"])
 
 
-class ReadThreadScriptTests(unittest.TestCase):
+class ReadThreadScriptTests(PluginScriptTestCase):
     def test_fetches_markdown_export_for_thread_id_with_api_key(self):
         from read_thread import fetch_thread_export
 
@@ -1490,6 +1563,49 @@ class ReadThreadScriptTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://jieli.app/threads/T-abc123.md")
         self.assertEqual(captured["auth"], "Bearer secret")
 
+    def test_read_thread_accepts_settings_api_key(self):
+        from read_thread import main
+
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+            def read(self):
+                return b"thread body"
+
+        def fake_urlopen(request, timeout):
+            captured["authorization"] = request.headers["Authorization"]
+            captured["url"] = request.full_url
+            return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            settings_path = home / ".config" / "jieli" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"api_key": "settings-key", "base_url": "https://jieli.example.test"}),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(Path, "home", return_value=home),
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(sys, "argv", ["read_thread.py", "T-1"]),
+                patch("urllib.request.urlopen", fake_urlopen),
+                patch("sys.stdout", io.StringIO()) as stdout,
+            ):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(captured["authorization"], "Bearer settings-key")
+        self.assertEqual(captured["url"], "https://jieli.example.test/threads/T-1.md")
+        self.assertEqual(stdout.getvalue(), "thread body")
+
     def test_read_thread_main_can_request_truncated_tool_results(self):
         from read_thread import main
 
@@ -1522,7 +1638,7 @@ class ReadThreadScriptTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://jieli.app/threads/T-abc123.md?truncate_tool_results=1")
 
 
-class CommitTrailerTests(unittest.TestCase):
+class CommitTrailerTests(PluginScriptTestCase):
     def test_pre_tool_use_output_adds_trailer_when_session_mapping_exists(self):
         from commit_trailer import build_hook_response
 
@@ -1658,7 +1774,7 @@ class CommitTrailerTests(unittest.TestCase):
         self.assertEqual(response, {})
 
 
-class PluginManifestTests(unittest.TestCase):
+class PluginManifestTests(PluginScriptTestCase):
     def test_bin_read_thread_wrapper_resolves_plugin_root_without_env(self):
         wrapper = PLUGIN_ROOT / "bin" / "jieli-read-thread"
 
@@ -1679,6 +1795,7 @@ class PluginManifestTests(unittest.TestCase):
         self.assertNotIn("hooks", manifest)
 
         hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        self.assertNotIn("UserPromptSubmit", hooks["hooks"])
         pre_tool_use = hooks["hooks"]["PreToolUse"]
         commands = [
             hook["command"]

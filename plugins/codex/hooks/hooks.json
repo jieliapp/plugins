@@ -12,17 +12,6 @@
         ]
       }
     ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger userpromptsubmit --jieli-hook",
-            "statusMessage": "Syncing Codex session to Jieli"
-          }
-        ]
-      }
-    ],
     "PreCompact": [
       {
         "matcher": "manual|auto",

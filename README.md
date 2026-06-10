@@ -58,15 +58,15 @@ codex plugin add codex@jieli
 
 Then enable the plugin and trust its hooks with `/hooks`.
 
-Configure the API key. Recommended for Codex: write `~/.jieli/settings.json`, which works even after Codex is already running:
+Configure the API key. Recommended for Codex and Claude Code: write `~/.config/jieli/settings.json`, which works even after the agent is already running:
 
 ```bash
-mkdir -p ~/.jieli
+mkdir -p ~/.config/jieli
 python3 - <<'PY'
 import json
 from pathlib import Path
 
-path = Path.home() / ".jieli/settings.json"
+path = Path.home() / ".config/jieli/settings.json"
 settings = {"api_key": "your-jieli-api-key", "base_url": "https://jieli.app"}
 path.write_text(json.dumps(settings, indent=2) + "\n")
 path.chmod(0o600)

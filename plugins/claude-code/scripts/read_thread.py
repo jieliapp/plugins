@@ -4,16 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 
 DEFAULT_MAX_CHARS = 12000
 DEFAULT_BASE_URL = "https://jieli.app"
 EXPORT_TIMEOUT_SECONDS = 20
+SETTINGS_FILE_NAME = "settings.json"
 
 
 def validate_thread_id(thread_id: str) -> str:
@@ -88,6 +91,10 @@ def required_env(*names: str) -> str:
         value = os.environ.get(name)
         if value:
             return value
+    if names and names[0] == "JIELI_API_KEY":
+        value = settings_value("api_key", "JIELI_API_KEY")
+        if value:
+            return value
     raise KeyError(names[0])
 
 
@@ -96,6 +103,31 @@ def optional_env(*names: str) -> str:
         value = os.environ.get(name)
         if value:
             return value
+    if names and names[0] == "JIELI_BASE_URL":
+        value = settings_value("base_url", "JIELI_BASE_URL")
+        if value:
+            return value.rstrip("/")
+    return ""
+
+
+def settings_path(home: Path | None = None) -> Path:
+    return (home or Path.home()) / ".config" / "jieli" / SETTINGS_FILE_NAME
+
+
+def load_settings(home: Path | None = None) -> dict[str, object]:
+    try:
+        value = json.loads(settings_path(home).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def settings_value(*keys: str) -> str:
+    settings = load_settings()
+    for key in keys:
+        value = settings.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return ""
 
 

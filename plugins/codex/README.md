@@ -4,15 +4,15 @@ Sync local Codex sessions to Jieli threads, redact common secrets before upload,
 
 ## Configuration
 
-Recommended: write `~/.jieli/settings.json`. This works even after Codex is already running:
+Recommended: write `~/.config/jieli/settings.json`. This works even after Codex is already running:
 
 ```bash
-mkdir -p ~/.jieli
+mkdir -p ~/.config/jieli
 python3 - <<'PY'
 import json
 from pathlib import Path
 
-path = Path.home() / ".jieli/settings.json"
+path = Path.home() / ".config/jieli/settings.json"
 settings = {"api_key": "your-jieli-api-key", "base_url": "https://jieli.app"}
 path.write_text(json.dumps(settings, indent=2) + "\n")
 path.chmod(0o600)
@@ -35,7 +35,6 @@ Codex discovers plugin hooks from `hooks/hooks.json`. After installing or enabli
 The plugin syncs on:
 
 - `SessionStart`
-- `UserPromptSubmit`
 - `PreCompact`
 - `PostCompact`
 - `Stop`
@@ -59,7 +58,7 @@ Session mappings are stored at:
 Plugin settings are read from:
 
 ```text
-~/.jieli/settings.json
+~/.config/jieli/settings.json
 ```
 
 Hook errors are appended to:

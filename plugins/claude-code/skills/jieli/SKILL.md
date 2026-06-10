@@ -19,8 +19,8 @@ Do not use this skill for the current conversation when the needed context is al
 
 - A Jieli URL such as `https://jieli.example.com/threads/<provider_thread_id>`, `https://jieli.example.com/threads/<provider_thread_id>.md`, or a raw provider thread id.
 - The user's question or goal for reading the thread. If none is provided, summarize the recent goal, decisions, touched files, commands, verification, and open follow-ups.
-- Jieli credentials from `JIELI_API_KEY`, or plugin user config exported as `CLAUDE_PLUGIN_OPTION_API_KEY`.
-- Optional base URL from `JIELI_BASE_URL` or `CLAUDE_PLUGIN_OPTION_BASE_URL`. If omitted, use `https://jieli.app`.
+- Jieli credentials from `JIELI_API_KEY`, plugin user config exported as `CLAUDE_PLUGIN_OPTION_API_KEY`, or `~/.config/jieli/settings.json`.
+- Optional base URL from `JIELI_BASE_URL`, `CLAUDE_PLUGIN_OPTION_BASE_URL`, or `~/.config/jieli/settings.json`. If omitted, use `https://jieli.app`.
 
 ## Environment
 
@@ -33,12 +33,13 @@ BASE_URL="${JIELI_BASE_URL:-${CLAUDE_PLUGIN_OPTION_BASE_URL:-https://jieli.app}}
 API_KEY="${JIELI_API_KEY:-$CLAUDE_PLUGIN_OPTION_API_KEY}"
 ```
 
-If `API_KEY` is missing, ask the user to configure the plugin or export `JIELI_API_KEY`. Only ask for `JIELI_BASE_URL` when the user uses a self-hosted Jieli instance.
+If `API_KEY` is missing, ask the user to configure the plugin, export `JIELI_API_KEY`, or write `~/.config/jieli/settings.json`. Only ask for `JIELI_BASE_URL` when the user uses a self-hosted Jieli instance.
 
 To configure hosted Jieli, ask the user to sign in at `https://jieli.app`, copy an API key, and either:
 
 - Paste the key into the current agent chat and ask the agent to set it.
 - Configure the plugin `api_key` option, which Claude Code exports as `CLAUDE_PLUGIN_OPTION_API_KEY`.
+- Write `~/.config/jieli/settings.json`.
 - Export it manually:
 
 ```bash

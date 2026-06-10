@@ -25,9 +25,11 @@ PROVIDER = "claude_code"
 DEFAULT_BASE_URL = "https://jieli.app"
 LOCK_TTL_SECONDS = 60
 TRANSCRIPT_FLUSH_TRIGGERS = {"stop", "sessionend", "precompact"}
+MISSING_CONFIG_NOTICE_TRIGGERS = {"stop", "sessionend", "precompact"}
 TRANSCRIPT_QUIET_SECONDS = 0.25
 TRANSCRIPT_FLUSH_TIMEOUT_SECONDS = 1.5
 ATTACHMENT_CACHE_FILE = "claude-attachments.json"
+SETTINGS_FILE_NAME = "settings.json"
 CONFIG_ENV_GROUPS = (
     ("JIELI_API_KEY", ("JIELI_API_KEY", "CLAUDE_PLUGIN_OPTION_API_KEY")),
 )
@@ -52,11 +54,18 @@ ImageUploader = Callable[[Path], str]
 
 def missing_config_vars(environ: Mapping[str, str] | None = None) -> list[str]:
     env = os.environ if environ is None else environ
-    return [primary for primary, names in CONFIG_ENV_GROUPS if not any(env.get(name) for name in names)]
+    missing: list[str] = []
+    for primary, names in CONFIG_ENV_GROUPS:
+        if any(env.get(name) for name in names):
+            continue
+        if primary == "JIELI_API_KEY" and settings_value("api_key", "JIELI_API_KEY"):
+            continue
+        missing.append(primary)
+    return missing
 
 
 def build_missing_config_hook_response(trigger: str, missing: list[str]) -> dict[str, Any]:
-    if trigger != "userpromptsubmit" or not missing:
+    if trigger.lower() not in MISSING_CONFIG_NOTICE_TRIGGERS or not missing:
         return {}
     missing_text = ", ".join(missing)
     return {
@@ -64,8 +73,9 @@ def build_missing_config_hook_response(trigger: str, missing: list[str]) -> dict
         "systemMessage": (
             "Jieli Claude Code Sync is not configured. "
             f"Missing: {missing_text}. "
-            f"Go to {DEFAULT_BASE_URL}, register or sign in, create an API key, then configure the plugin api_key option "
-            "or set JIELI_API_KEY in your environment. "
+            f"Go to {DEFAULT_BASE_URL}, register or sign in, create an API key, then configure the plugin api_key option, "
+            "set JIELI_API_KEY in your environment, "
+            "or write `~/.config/jieli/settings.json` with `{\"api_key\":\"<key>\",\"base_url\":\"https://jieli.app\"}`. "
             "You can paste the API key into this chat and ask the agent to configure it for you. "
             "Sync will stay disabled until configured."
         ),
@@ -827,8 +837,7 @@ def main() -> int:
                 return 0
             transcript_path = hook_data.get("transcript_path")
             if transcript_path and not Path(transcript_path).exists():
-                # Transcript not flushed to disk yet (common on SessionStart /
-                # UserPromptSubmit). A later hook will sync once it exists.
+                # Transcript not flushed to disk yet. A later hook will sync once it exists.
                 return 0
             if args.trigger.lower() in TRANSCRIPT_FLUSH_TRIGGERS and transcript_path:
                 wait_for_transcript_flush(Path(transcript_path))
@@ -852,6 +861,10 @@ def required_env(*names: str) -> str:
         value = os.environ.get(name)
         if value:
             return value
+    if names and names[0] == "JIELI_API_KEY":
+        value = settings_value("api_key", "JIELI_API_KEY")
+        if value:
+            return value
     raise KeyError(names[0])
 
 
@@ -860,6 +873,31 @@ def optional_env(*names: str) -> str:
         value = os.environ.get(name)
         if value:
             return value
+    if names and names[0] == "JIELI_BASE_URL":
+        value = settings_value("base_url", "JIELI_BASE_URL")
+        if value:
+            return value.rstrip("/")
+    return ""
+
+
+def settings_path(home: Path | None = None) -> Path:
+    return (home or Path.home()) / ".config" / "jieli" / SETTINGS_FILE_NAME
+
+
+def load_settings(home: Path | None = None) -> dict[str, Any]:
+    try:
+        value = json.loads(settings_path(home).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def settings_value(*keys: str) -> str:
+    settings = load_settings()
+    for key in keys:
+        value = settings.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return ""
 
 

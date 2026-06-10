@@ -13,12 +13,27 @@ from unittest.mock import patch
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-for module_name in ("sync", "commit_trailer", "read_thread", "redact"):
-    sys.modules.pop(module_name, None)
-sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
+PLUGIN_SCRIPTS = str(PLUGIN_ROOT / "scripts")
+SCRIPT_MODULES = ("sync", "commit_trailer", "read_thread", "redact", "jieli_config")
 
 
-class CodexSyncScriptTests(unittest.TestCase):
+def use_plugin_scripts() -> None:
+    for module_name in SCRIPT_MODULES:
+        sys.modules.pop(module_name, None)
+    if PLUGIN_SCRIPTS in sys.path:
+        sys.path.remove(PLUGIN_SCRIPTS)
+    sys.path.insert(0, PLUGIN_SCRIPTS)
+
+
+use_plugin_scripts()
+
+
+class PluginScriptTestCase(unittest.TestCase):
+    def setUp(self):
+        use_plugin_scripts()
+
+
+class CodexSyncScriptTests(PluginScriptTestCase):
     def test_redact_text_removes_jieli_api_key(self):
         from redact import redact_text
 
@@ -161,6 +176,53 @@ class CodexSyncScriptTests(unittest.TestCase):
         self.assertNotIn("developer instructions", raw_payload)
         self.assertNotIn("private reasoning", raw_payload)
         self.assertNotIn("encrypted", raw_payload)
+
+    def test_build_payload_uses_transcript_session_id_before_hook_session_id(self):
+        from sync import build_payload_from_hook
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "rollout-2026-06-08T00-00-00-stable-id.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "session_meta",
+                                "timestamp": "2026-06-08T00:00:00.000Z",
+                                "payload": {
+                                    "id": "stable-transcript-id",
+                                    "cwd": "/Users/alice/work/jieli",
+                                    "git": {"branch": "plugin/codex"},
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "response_item",
+                                "timestamp": "2026-06-08T00:00:01.000Z",
+                                "payload": {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": "hello"}],
+                                },
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_payload_from_hook(
+                {
+                    "session_id": "hook-rotated-id",
+                    "transcript_path": str(transcript),
+                },
+                base_url="https://jieli.example.test",
+            )
+
+        self.assertEqual(payload["thread"]["id"], "T-stable-transcript-id")
+        self.assertEqual(payload["source_url"], "https://jieli.example.test/threads/T-stable-transcript-id")
 
     def test_build_payload_normalizes_custom_apply_patch_calls_for_jieli(self):
         from sync import build_payload_from_hook
@@ -845,12 +907,12 @@ threads list, hidden branch name, just show repo"""
             with patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}, clear=True):
                 self.assertEqual(find_session_transcript("content-only"), transcript)
 
-    def test_missing_config_response_is_visible_on_user_prompt_submit(self):
+    def test_missing_config_response_is_visible_on_stop(self):
         from sync import build_missing_config_hook_response, missing_config_vars
 
         with tempfile.TemporaryDirectory() as tmpdir, patch.object(Path, "home", return_value=Path(tmpdir)):
             missing = missing_config_vars({})
-            response = build_missing_config_hook_response("userpromptsubmit", missing)
+            response = build_missing_config_hook_response("stop", missing)
 
         self.assertTrue(response["continue"])
         self.assertIn("systemMessage", response)
@@ -859,13 +921,18 @@ threads list, hidden branch name, just show repo"""
         self.assertIn("create an API key", response["systemMessage"])
         self.assertIn("chmod it to 600", response["systemMessage"])
 
+    def test_missing_config_response_is_quiet_on_user_prompt_submit(self):
+        from sync import build_missing_config_hook_response
+
+        self.assertEqual(build_missing_config_hook_response("userpromptsubmit", ["JIELI_API_KEY"]), {})
+
     def test_settings_file_satisfies_missing_config_and_base_url(self):
         import jieli_config
         from sync import build_payload_from_hook, missing_config_vars, required_env
 
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir)
-            settings_path = home / ".jieli" / "settings.json"
+            settings_path = home / ".config" / "jieli" / "settings.json"
             settings_path.parent.mkdir(parents=True)
             settings_path.write_text(
                 json.dumps({"api_key": "jieli-settings-key", "base_url": "https://jieli.example.test"}),
@@ -898,7 +965,7 @@ threads list, hidden branch name, just show repo"""
 
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir)
-            settings_path = home / ".jieli" / "settings.json"
+            settings_path = home / ".config" / "jieli" / "settings.json"
             settings_path.parent.mkdir(parents=True)
             settings_path.write_text(
                 json.dumps({"api_key": "settings-key", "base_url": "https://settings.example.test"}),
@@ -1035,7 +1102,7 @@ threads list, hidden branch name, just show repo"""
         self.assertFalse((home / ".jieli" / "hooks.log").exists())
 
 
-class CodexCommitTrailerTests(unittest.TestCase):
+class CodexCommitTrailerTests(PluginScriptTestCase):
     def test_updated_commit_command_injects_codex_thread_id_trailer(self):
         from commit_trailer import updated_commit_command
 
@@ -1155,7 +1222,7 @@ class CodexCommitTrailerTests(unittest.TestCase):
         self.assertIn("Codex-Thread-ID: https://jieli.example.test/threads/T-codex-1", output["updatedInput"]["command"])
 
 
-class CodexReadThreadTests(unittest.TestCase):
+class CodexReadThreadTests(PluginScriptTestCase):
     def test_validate_thread_id_rejects_urls_and_export_extensions(self):
         from read_thread import validate_thread_id
 
@@ -1202,7 +1269,7 @@ class CodexReadThreadTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir)
-            settings_path = home / ".jieli" / "settings.json"
+            settings_path = home / ".config" / "jieli" / "settings.json"
             settings_path.parent.mkdir(parents=True)
             settings_path.write_text(
                 json.dumps({"api_key": "settings-key", "base_url": "https://jieli.example.test"}),
@@ -1222,6 +1289,13 @@ class CodexReadThreadTests(unittest.TestCase):
         self.assertEqual(captured["authorization"], "Bearer settings-key")
         self.assertEqual(captured["url"], "https://jieli.example.test/threads/T-1.md")
         self.assertEqual(stdout.getvalue(), "thread markdown")
+
+
+class CodexPluginManifestTests(PluginScriptTestCase):
+    def test_sync_hooks_do_not_run_on_user_prompt_submit(self):
+        hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+
+        self.assertNotIn("UserPromptSubmit", hooks["hooks"])
 
 
 if __name__ == "__main__":

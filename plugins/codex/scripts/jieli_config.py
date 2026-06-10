@@ -13,7 +13,7 @@ SETTINGS_FILE_NAME = "settings.json"
 
 
 def settings_path(home: Path | None = None) -> Path:
-    return (home or Path.home()) / ".jieli" / SETTINGS_FILE_NAME
+    return (home or Path.home()) / ".config" / "jieli" / SETTINGS_FILE_NAME
 
 
 def load_settings(home: Path | None = None) -> dict[str, Any]:
