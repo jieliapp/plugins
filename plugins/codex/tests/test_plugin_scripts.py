@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_SCRIPTS = str(PLUGIN_ROOT / "scripts")
-SCRIPT_MODULES = ("sync", "commit_trailer", "read_thread", "redact", "jieli_config")
+SCRIPT_MODULES = ("sync", "commit_trailer", "read_thread", "redact", "jieli_config", "handoff_info")
 
 
 def use_plugin_scripts() -> None:
@@ -1102,7 +1102,124 @@ threads list, hidden branch name, just show repo"""
         self.assertFalse((home / ".jieli" / "hooks.log").exists())
 
 
+class CodexHandoffInfoTests(PluginScriptTestCase):
+    def test_main_prefers_rollout_session_meta_id_over_hook_session_id(self):
+        from handoff_info import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "rollout.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "id": "stable-codex-id",
+                            "cwd": tmpdir,
+                            "git": {"branch": "feature/handoff"},
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            context = {"session_id": "hook-id", "transcript_path": str(transcript), "cwd": "/wrong"}
+            encoded = base64.b64encode(json.dumps(context).encode("utf-8")).decode("ascii")
+            stdout = io.StringIO()
+            with (
+                patch.dict(os.environ, {"JIELI_HANDOFF_CONTEXT_B64": encoded, "JIELI_BASE_URL": "https://jieli.example.test"}, clear=True),
+                patch.object(sys, "argv", ["handoff_info.py"]),
+                patch("sys.stdout", stdout),
+            ):
+                exit_code = main()
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["confidence"], "high")
+        self.assertEqual(data["provider"], "codex")
+        self.assertEqual(data["session_id"], "stable-codex-id")
+        self.assertEqual(data["thread_id"], "T-stable-codex-id")
+        self.assertEqual(data["url"], "https://jieli.example.test/threads/T-stable-codex-id")
+        self.assertEqual(data["cwd"], tmpdir)
+        self.assertEqual(data["branch"], "feature/handoff")
+
+    def test_main_fails_closed_without_stable_transcript_id(self):
+        from handoff_info import main
+
+        context = {"session_id": "hook-only", "cwd": "/repo"}
+        encoded = base64.b64encode(json.dumps(context).encode("utf-8")).decode("ascii")
+        stdout = io.StringIO()
+        with (
+            patch.dict(os.environ, {"JIELI_HANDOFF_CONTEXT_B64": encoded}, clear=True),
+            patch.object(sys, "argv", ["handoff_info.py"]),
+            patch("sys.stdout", stdout),
+        ):
+            exit_code = main()
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["confidence"], "missing")
+        self.assertEqual(data["thread_id"], "")
+        self.assertIn("stable", data["reason"])
+
+    def test_main_fails_closed_without_hook_context(self):
+        from handoff_info import main
+
+        stdout = io.StringIO()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(sys, "argv", ["handoff_info.py"]),
+            patch("sys.stdout", stdout),
+        ):
+            exit_code = main()
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["confidence"], "missing")
+        self.assertEqual(data["thread_id"], "")
+        self.assertIn("reason", data)
+
+
 class CodexCommitTrailerTests(PluginScriptTestCase):
+    def test_pre_tool_use_injects_handoff_context_for_helper_command(self):
+        from commit_trailer import build_hook_response
+
+        response = build_hook_response(
+            {
+                "session_id": "codex-handoff",
+                "transcript_path": "/tmp/codex-session.jsonl",
+                "cwd": "/repo",
+                "tool_name": "Bash",
+                "tool_input": {"command": "jieli-handoff-info"},
+            }
+        )
+
+        updated = response["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertIn("JIELI_HANDOFF_CONTEXT_B64=", updated)
+        self.assertIn(" python3 ", updated)
+        self.assertTrue(updated.endswith("/scripts/handoff_info.py"))
+        encoded = updated.split("JIELI_HANDOFF_CONTEXT_B64=", 1)[1].split(" ", 1)[0].strip("'")
+        context = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        self.assertEqual(context["session_id"], "codex-handoff")
+        self.assertEqual(context["transcript_path"], "/tmp/codex-session.jsonl")
+        self.assertEqual(context["cwd"], "/repo")
+
+    def test_pre_tool_use_injects_handoff_context_for_script_command(self):
+        from commit_trailer import build_hook_response
+
+        response = build_hook_response(
+            {
+                "session_id": "codex-handoff",
+                "transcript_path": "/tmp/codex-session.jsonl",
+                "cwd": "/repo",
+                "tool_name": "Bash",
+                "tool_input": {"command": 'python3 "${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/handoff_info.py"'},
+            }
+        )
+
+        updated = response["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertIn("JIELI_HANDOFF_CONTEXT_B64=", updated)
+        self.assertTrue(updated.endswith(' python3 "${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/handoff_info.py"'))
+
     def test_updated_commit_command_injects_codex_thread_id_trailer(self):
         from commit_trailer import updated_commit_command
 
@@ -1292,6 +1409,21 @@ class CodexReadThreadTests(PluginScriptTestCase):
 
 
 class CodexPluginManifestTests(PluginScriptTestCase):
+    def test_bin_handoff_info_wrapper_resolves_plugin_root_without_env(self):
+        wrapper = PLUGIN_ROOT / "bin" / "jieli-handoff-info"
+
+        result = subprocess.run(
+            [str(wrapper), "--help"],
+            env={},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage:", result.stdout)
+
     def test_sync_hooks_do_not_run_on_user_prompt_submit(self):
         hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
 

@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Sync Codex sessions to Jieli threads and attach Jieli thread trailers to Codex-created commits.",
   "author": {
     "name": "Jieli"

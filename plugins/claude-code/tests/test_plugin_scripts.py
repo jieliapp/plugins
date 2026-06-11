@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import os
@@ -13,7 +14,7 @@ from unittest.mock import patch
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_SCRIPTS = str(PLUGIN_ROOT / "scripts")
-SCRIPT_MODULES = ("sync", "commit_trailer", "read_thread", "redact")
+SCRIPT_MODULES = ("sync", "commit_trailer", "read_thread", "redact", "handoff_info")
 
 
 def use_plugin_scripts() -> None:
@@ -1638,7 +1639,77 @@ class ReadThreadScriptTests(PluginScriptTestCase):
         self.assertEqual(captured["url"], "https://jieli.app/threads/T-abc123.md?truncate_tool_results=1")
 
 
+class HandoffInfoTests(PluginScriptTestCase):
+    def test_main_outputs_high_confidence_info_from_hook_context(self):
+        from handoff_info import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = {
+                "session_id": "cc-1",
+                "transcript_path": str(Path(tmpdir) / "session.jsonl"),
+                "cwd": tmpdir,
+            }
+            encoded = base64.b64encode(json.dumps(context).encode("utf-8")).decode("ascii")
+            stdout = io.StringIO()
+            with (
+                patch.dict(os.environ, {"JIELI_HANDOFF_CONTEXT_B64": encoded, "JIELI_BASE_URL": "https://jieli.example.test"}, clear=True),
+                patch.object(sys, "argv", ["handoff_info.py"]),
+                patch("sys.stdout", stdout),
+            ):
+                exit_code = main()
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["confidence"], "high")
+        self.assertEqual(data["provider"], "claude_code")
+        self.assertEqual(data["session_id"], "cc-1")
+        self.assertEqual(data["thread_id"], "T-cc-1")
+        self.assertEqual(data["url"], "https://jieli.example.test/threads/T-cc-1")
+        self.assertEqual(data["cwd"], tmpdir)
+        self.assertIn("worktree_status", data)
+
+    def test_main_fails_closed_without_hook_context(self):
+        from handoff_info import main
+
+        stdout = io.StringIO()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(sys, "argv", ["handoff_info.py"]),
+            patch("sys.stdout", stdout),
+        ):
+            exit_code = main()
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["confidence"], "missing")
+        self.assertEqual(data["thread_id"], "")
+        self.assertIn("reason", data)
+
+
 class CommitTrailerTests(PluginScriptTestCase):
+    def test_pre_tool_use_injects_handoff_context_for_helper_command(self):
+        from commit_trailer import build_hook_response
+
+        response = build_hook_response(
+            {
+                "session_id": "cc-handoff",
+                "transcript_path": "/tmp/claude-session.jsonl",
+                "cwd": "/repo",
+                "tool_name": "Bash",
+                "tool_input": {"command": "jieli-handoff-info"},
+            }
+        )
+
+        updated = response["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertIn("JIELI_HANDOFF_CONTEXT_B64=", updated)
+        self.assertIn(" python3 ", updated)
+        self.assertTrue(updated.endswith("/scripts/handoff_info.py"))
+        encoded = updated.split("JIELI_HANDOFF_CONTEXT_B64=", 1)[1].split(" ", 1)[0].strip("'")
+        context = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        self.assertEqual(context["session_id"], "cc-handoff")
+        self.assertEqual(context["transcript_path"], "/tmp/claude-session.jsonl")
+        self.assertEqual(context["cwd"], "/repo")
+
     def test_pre_tool_use_output_adds_trailer_when_session_mapping_exists(self):
         from commit_trailer import build_hook_response
 

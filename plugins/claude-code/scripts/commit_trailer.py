@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import shlex
 import sys
@@ -12,6 +13,15 @@ from typing import Any
 
 
 TRAILER_KEY = "Jieli-Thread"
+HANDOFF_CONTEXT_ENV = "JIELI_HANDOFF_CONTEXT_B64"
+HANDOFF_HELPER_COMMAND = "jieli-handoff-info"
+HANDOFF_HELPER_SCRIPT_COMMANDS = {
+    "${CLAUDE_PLUGIN_ROOT}/scripts/handoff_info.py",
+    "$CLAUDE_PLUGIN_ROOT/scripts/handoff_info.py",
+    "${PLUGIN_ROOT}/scripts/handoff_info.py",
+    "$PLUGIN_ROOT/scripts/handoff_info.py",
+    "${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/handoff_info.py",
+}
 AMBIGUOUS_TOKENS = ["||", ";", "\n", "$(", "`", "<<", "|"]
 
 
@@ -19,7 +29,11 @@ def build_hook_response(hook_data: dict[str, Any], home: Path | None = None) -> 
     if hook_data.get("tool_name") != "Bash":
         return {}
     command = (hook_data.get("tool_input") or {}).get("command", "")
-    updated = updated_commit_command(command, hook_data.get("session_id", ""), home or Path.home())
+    if not isinstance(command, str) or not command:
+        return {}
+    updated = updated_handoff_command(command, hook_data)
+    if not updated:
+        updated = updated_commit_command(command, hook_data.get("session_id", ""), home or Path.home())
     if not updated:
         return {}
     return {
@@ -29,6 +43,36 @@ def build_hook_response(hook_data: dict[str, Any], home: Path | None = None) -> 
             "updatedInput": {"command": updated},
         }
     }
+
+
+def updated_handoff_command(command: str, hook_data: dict[str, Any]) -> str:
+    helper_command = resolved_handoff_helper_command(command)
+    if not helper_command:
+        return ""
+    context = {
+        "session_id": str(hook_data.get("session_id") or ""),
+        "transcript_path": str(hook_data.get("transcript_path") or hook_data.get("session_path") or ""),
+        "cwd": str(hook_data.get("cwd") or ""),
+    }
+    encoded = base64.b64encode(json.dumps(context).encode("utf-8")).decode("ascii")
+    return f"{HANDOFF_CONTEXT_ENV}={shlex.quote(encoded)} {helper_command}"
+
+
+def resolved_handoff_helper_command(command: str) -> str:
+    if HANDOFF_CONTEXT_ENV in command:
+        return ""
+    if any(token in command for token in AMBIGUOUS_TOKENS):
+        return ""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return ""
+    if len(parts) == 1 and parts[0] == HANDOFF_HELPER_COMMAND:
+        script = Path(__file__).with_name("handoff_info.py")
+        return f"python3 {shlex.quote(str(script))}"
+    if len(parts) == 2 and parts[0] == "python3" and parts[1] in HANDOFF_HELPER_SCRIPT_COMMANDS:
+        return command
+    return ""
 
 
 def updated_commit_command(command: str, session_id: str, home: Path) -> str:
