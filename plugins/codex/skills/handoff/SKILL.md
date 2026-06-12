@@ -111,10 +111,10 @@ You are continuing work from a previous Codex session.
 Current Jieli thread could not be identified automatically; ask the user for the thread id or Jieli URL if full transcript access is needed.
 ```
 
-Write the prompt to a temp file and print the same prompt in your reply:
+Write the full handoff prompt to a temp file, but do not print the full prompt in your reply:
 
 - With a thread id: `OUT="${TMPDIR:-/tmp}/handoff-$THREAD_ID.md"`
-- Without a thread id: `OUT="${TMPDIR:-/tmp}/handoff-unknown.md"`
+- Without a thread id: derive a short slug from the user goal if present, otherwise from the handoff summary title, and use `OUT="${TMPDIR:-/tmp}/handoff-$SLUG.md"`.
 
 Use a safe writer, for example Python, so prompt content cannot break a shell here-doc:
 
@@ -128,12 +128,12 @@ PY
 echo "Wrote handoff to $OUT"
 ```
 
-Then print the same handoff prompt in a fenced block in your reply so the user can copy it directly, and tell them the saved file path.
+Then reply with only a brief summary: the saved file path, whether a thread id was included, the relevant files count/list, and the next goal. Do not include the full handoff prompt unless the user explicitly asks to print it.
 
 ## Output
 
-- A ready-to-paste handoff prompt printed in the reply.
-- The same prompt saved to `$OUT`.
+- The full ready-to-paste handoff prompt saved to `$OUT`.
+- A brief reply summary with the saved path and key metadata, not the full handoff content.
 - If a high-confidence thread id is available, the next agent can use the `jieli` skill to read `<THREAD_ID>` for the full transcript.
 
 ## Notes & Safety
