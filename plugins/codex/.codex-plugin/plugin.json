@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Sync Codex sessions to Jieli threads and attach Jieli thread trailers to Codex-created commits.",
   "author": {
     "name": "Jieli"
@@ -18,6 +18,9 @@
     "longDescription": "Jieli Codex Sync uploads local Codex session transcripts to Jieli, redacts common secrets, provides a Jieli thread reading skill, and adds best-effort Jieli-Thread trailers to Codex-created git commits.",
     "developerName": "Jieli",
     "category": "Productivity",
+    "brandColor": "#ffd21a",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
     "capabilities": [
       "Read",
       "Write"
