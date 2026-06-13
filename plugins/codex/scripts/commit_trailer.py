@@ -74,7 +74,7 @@ def resolved_handoff_helper_command(command: str) -> str:
         parts = shlex.split(command)
     except ValueError:
         return ""
-    if len(parts) == 1 and parts[0] == HANDOFF_HELPER_COMMAND:
+    if len(parts) == 1 and Path(parts[0]).name == HANDOFF_HELPER_COMMAND:
         script = Path(__file__).with_name("handoff_info.py")
         return f"python3 {shlex.quote(str(script))}"
     if len(parts) == 2 and parts[0] == "python3" and parts[1] in HANDOFF_HELPER_SCRIPT_COMMANDS:

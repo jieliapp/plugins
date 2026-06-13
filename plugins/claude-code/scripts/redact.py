@@ -6,12 +6,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Any, Callable
+from typing import Any, Callable, Union
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 REDACTED = "[REDACTED]"
 
-Replacement = str | Callable[[re.Match[str]], str]
+Replacement = Union[str, Callable[[re.Match[str]], str]]
 
 
 def typed_redaction(rule_id: str) -> str:

@@ -50,8 +50,8 @@ Expected JSON shape:
 
 Rules:
 
-- Treat `confidence: "high"` with a non-empty `thread_id` and `url` as the only case where the Jieli read-thread line may be included.
-- If `confidence` is not `"high"`, or either `thread_id` or `url` is empty, do not guess from the newest transcript. Still produce the handoff prompt, but omit the Jieli thread/read-thread lines and mention that the current thread could not be identified.
+- Include the Jieli read-thread line only when the helper returns a non-empty `thread_id` and `url` for the current session.
+- If either `thread_id` or `url` is empty, do not guess from the newest transcript. Still produce the handoff prompt, but omit the Jieli thread/read-thread lines and mention that the current thread could not be identified.
 - If the helper fails or prints invalid JSON, continue without a thread id and state that session metadata could not be resolved.
 
 ### 2. Compose the handoff context
@@ -90,7 +90,7 @@ My request:
 
 ### 3. Assemble, write, and print
 
-If the thread was resolved with high confidence, assemble the handoff prompt in this shape. The first two lines are fixed; the body is the goal-filtered plain-text bullet context from step 2. Include helper metadata such as repo/cwd/branch/status only when useful for the request.
+If the current thread was identified, assemble the handoff prompt in this shape. The first two lines are fixed; the body is the goal-filtered plain-text bullet context from step 2. Include helper metadata such as repo/cwd/branch/status only when useful for the request.
 
 ```text
 Continuing work from Jieli thread <THREAD_ID>.
@@ -133,10 +133,10 @@ Then reply with only a brief summary: the saved file path, whether a thread id w
 
 - The full ready-to-paste handoff prompt saved to `$OUT`.
 - A brief reply summary with the saved path and key metadata, not the full handoff content.
-- If a high-confidence thread id is available, the next agent can use the `jieli-read` skill to read `<THREAD_ID>` for the full transcript.
+- If a thread id is available, the next agent can use the `jieli-read` skill to read `<THREAD_ID>` for the full transcript.
 
 ## Notes & Safety
 
 - The current turn is uploaded to Jieli by the Stop hook after this turn ends, so `read_thread` may cover history only up to the previous sync. The handoff prompt itself must carry the key current context.
-- A wrong thread is worse than no thread. If the helper cannot identify the current thread with high confidence, do not guess.
+- A wrong thread is worse than no thread. If the helper cannot identify the current thread, do not guess.
 - Never include API keys, secrets, tokens, cookies, `.env` contents, full transcripts, large raw logs, or sensitive private data in the handoff prompt.

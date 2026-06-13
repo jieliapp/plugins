@@ -1806,6 +1806,23 @@ class CommitTrailerTests(PluginScriptTestCase):
         self.assertEqual(context["transcript_path"], "/tmp/claude-session.jsonl")
         self.assertEqual(context["cwd"], "/repo")
 
+    def test_pre_tool_use_injects_handoff_context_for_helper_bin_path(self):
+        from commit_trailer import build_hook_response
+
+        response = build_hook_response(
+            {
+                "session_id": "cc-handoff",
+                "transcript_path": "/tmp/claude-session.jsonl",
+                "cwd": "/repo",
+                "tool_name": "Bash",
+                "tool_input": {"command": "/tmp/plugin/bin/jieli-handoff-info"},
+            }
+        )
+
+        updated = response["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertIn("JIELI_HANDOFF_CONTEXT_B64=", updated)
+        self.assertTrue(updated.endswith("/scripts/handoff_info.py"))
+
     def test_pre_tool_use_output_adds_trailer_when_session_mapping_exists(self):
         from commit_trailer import build_hook_response
 
@@ -1971,6 +1988,21 @@ class PluginManifestTests(PluginScriptTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Find Jieli threads.", result.stdout)
+
+    def test_windows_bin_wrappers_resolve_plugin_root(self):
+        wrappers = {
+            "jieli-handoff-info.cmd": "handoff_info.py",
+            "jieli-read-thread.cmd": "read_thread.py",
+            "jieli-find-threads.cmd": "find_threads.py",
+        }
+
+        for wrapper_name, script_name in wrappers.items():
+            with self.subTest(wrapper=wrapper_name):
+                wrapper = PLUGIN_ROOT / "bin" / wrapper_name
+                content = wrapper.read_text(encoding="utf-8")
+                self.assertIn("set \"PLUGIN_ROOT=%BIN_DIR%..\"", content)
+                self.assertIn(f"scripts\\{script_name}", content)
+                self.assertIn("py -3", content)
 
     def test_jieli_skills_are_split_by_known_thread_id_vs_search(self):
         self.assertTrue((PLUGIN_ROOT / "skills" / "jieli-read" / "SKILL.md").exists())
