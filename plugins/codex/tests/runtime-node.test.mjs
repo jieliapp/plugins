@@ -131,7 +131,7 @@ test("builds Codex payload from JSONL while redacting and skipping private items
   );
 
   assert.equal(payload.provider, "codex");
-  assert.equal(payload.repo, "work/jieli");
+  assert.equal(payload.repo, "");
   assert.equal(payload.branch, "plugin/codex");
   assert.equal(payload.source_url, "https://jieli.example.test/threads/T-codex-1");
   assert.equal(payload.thread.id, "T-codex-1");
@@ -343,6 +343,23 @@ test("normalizes Codex repo metadata, data URL images, local image events, and a
     await assert.rejects(() => runtime.uploadAttachmentCached(otherImage, "https://jieli.example.test/", "secret", failingUpload), /backend is down/);
     assert.deepEqual(failingCalls, [otherImage, otherImage]);
   });
+});
+
+test("does not infer Codex repo metadata from local folder names", async () => {
+  const tmp = makeTempDir();
+  const local = join(tmp, "2026-06-14", "python");
+  mkdirSync(local, { recursive: true });
+  const transcript = join(tmp, "local-session.jsonl");
+  writeJsonl(transcript, [
+    { type: "session_meta", payload: { id: "codex-local", cwd: local, git: { branch: "main" } } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "写一个python版的二分排序算法" }] } },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook({ session_id: "codex-local", transcript_path: transcript }, "https://jieli.example.test");
+
+  assert.equal(payload.repo, "");
+  assert.equal(payload.repo_url, "");
+  assert.equal(payload.thread.cwd, local);
 });
 
 test("keeps the existing image label when the Codex uploader fails instead of inserting a placeholder", async () => {

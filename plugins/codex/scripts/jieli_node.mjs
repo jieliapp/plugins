@@ -433,7 +433,7 @@ async function buildPayloadFromHook(hookData, baseUrl = null, imageUploader = nu
   };
   return {
     provider: PROVIDER,
-    repo: repoFromCwd(cwd),
+    repo: "",
     repo_url: repoUrlFromCwd(cwd),
     branch,
     source_url: `${base}/threads/${providerThreadId}`,
@@ -1094,13 +1094,6 @@ function titleFromMessages(messages) {
   return "Codex session";
 }
 
-function repoFromCwd(cwd) {
-  if (repoUrlFromCwd(cwd)) return "";
-  const parts = String(cwd || "").split(/[\\/]+/).filter(Boolean);
-  if (parts.length >= 2) return parts.slice(-2).join("/");
-  return parts[0] || "";
-}
-
 function timestampMs(value) {
   if (typeof value !== "string" || !value) return 0;
   const ms = Date.parse(value);
@@ -1644,7 +1637,7 @@ function buildHandoffInfo(env = process.env, contextB64 = "") {
     base_url: baseUrl,
     cwd,
     transcript_path: transcriptPath,
-    repo: repoFromCwd(cwd),
+    repo: "",
     repo_url: repoUrlFromCwd(cwd),
     branch: meta.branch || gitBranch(cwd),
     worktree_status: worktreeStatus(cwd),
