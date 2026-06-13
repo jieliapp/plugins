@@ -1,7 +1,7 @@
 {
   "name": "jieli",
   "displayName": "Jieli",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Sync Claude Code sessions to Jieli threads and attach Jieli thread trailers to Claude-created commits.",
   "author": {
     "name": "Jieli"
