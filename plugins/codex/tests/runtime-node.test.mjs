@@ -476,6 +476,11 @@ test("handoff info and commit trailer helpers support Codex shell aliases and No
     assert.match(updated, /node .*jieli_node\.mjs handoff-info --context-b64 /);
     assert.deepEqual(decodeHandoffContext(updated), { session_id: "codex-handoff", transcript_path: "/tmp/codex-session.jsonl", cwd: "/repo" });
   }
+  const codexExecResponse = runtime.buildHookResponse({ session_id: "codex-exec", transcript_path: "/tmp/codex-exec.jsonl", cwd: "/repo", tool_name: "exec_command", tool_input: { cmd: "jieli-handoff-info" } });
+  const codexExecCommand = codexExecResponse.hookSpecificOutput.updatedInput.cmd;
+  assert.match(codexExecCommand, /node .*jieli_node\.mjs handoff-info --context-b64 /);
+  assert.equal(codexExecResponse.hookSpecificOutput.updatedInput.command, undefined);
+  assert.deepEqual(decodeHandoffContext(codexExecCommand), { session_id: "codex-exec", transcript_path: "/tmp/codex-exec.jsonl", cwd: "/repo" });
   for (const command of [
     "jieli-handoff-info.cmd",
     "jieli-handoff-info.exe",

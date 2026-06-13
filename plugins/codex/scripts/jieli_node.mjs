@@ -1204,7 +1204,8 @@ function commitTrailerMain(args) {
 
 function buildHookResponse(hookData) {
   if (!["Bash", "Shell", "shell_command", "exec_command"].includes(hookData.tool_name)) return {};
-  const command = hookData.tool_input?.command;
+  const commandKey = typeof hookData.tool_input?.cmd === "string" ? "cmd" : "command";
+  const command = hookData.tool_input?.[commandKey];
   if (typeof command !== "string" || !command) return {};
   let updated = updatedHandoffCommand(command, hookData);
   if (!updated) updated = updatedCommitCommand(command, hookData.session_id || "");
@@ -1213,7 +1214,7 @@ function buildHookResponse(hookData) {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
-      updatedInput: { command: updated },
+      updatedInput: { [commandKey]: updated },
     },
   };
 }
