@@ -276,7 +276,45 @@ test("normalizes Claude images and attachment cache behavior", async () => {
     assert.equal(first, "https://jieli.example.test/attachments/cached.png");
     assert.equal(second, "https://jieli.example.test/attachments/cached.png");
     assert.deepEqual(calls, [imagePath]);
+
+    const failingCalls = [];
+    const failingUpload = async (path) => {
+      failingCalls.push(path);
+      throw new Error("backend is down");
+    };
+    const otherImage = join(tmp, "2.png");
+    writeFileSync(otherImage, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
+    await assert.rejects(() => runtime.uploadAttachmentCached(otherImage, "https://jieli.example.test/", "secret", failingUpload), /backend is down/);
+    await assert.rejects(() => runtime.uploadAttachmentCached(otherImage, "https://jieli.example.test/", "secret", failingUpload), /backend is down/);
+    assert.deepEqual(failingCalls, [otherImage, otherImage]);
   });
+});
+
+test("keeps the existing image label when the uploader fails instead of inserting a placeholder", async () => {
+  const tmp = makeTempDir();
+  const imagePath = join(tmp, "1.png");
+  writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const transcript = join(tmp, "session.jsonl");
+  writeJsonl(transcript, [
+    {
+      type: "user",
+      uuid: "u-image-fallback",
+      sessionId: "cc-image-fallback",
+      message: { role: "user", content: [{ type: "text", text: "我测试下图片：\n\n[Image #1]\n你看到了什么" }, { type: "image", source: imagePath }] },
+    },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook(
+    { session_id: "cc-image-fallback", transcript_path: transcript, cwd: "/Users/alice/work/jieli" },
+    "https://jieli.example.test",
+    async () => {
+      throw new Error("backend is down");
+    },
+  );
+
+  assert.equal(payload.thread.messages.length, 1);
+  assert.equal(payload.thread.messages[0].content, "我测试下图片：\n\n[Image #1]\n你看到了什么");
+  assert.doesNotMatch(JSON.stringify(payload), /\[Image unavailable\]/);
 });
 
 test("handles Claude model aliases, local command noise, loaded skills, and split assistant messages", async () => {
@@ -359,6 +397,23 @@ test("configuration, upload, lock, and transcript flush helpers match hook behav
     assert.match(response.systemMessage, /create an API key/);
     assert.doesNotMatch(response.systemMessage, /self-hosted/);
     assert.deepEqual(runtime.buildMissingConfigHookResponse("userpromptsubmit", ["JIELI_API_KEY"]), {});
+  });
+
+  const settingsHome = makeTempDir();
+  mkdirSync(join(settingsHome, ".config", "jieli"), { recursive: true });
+  writeFileSync(
+    join(settingsHome, ".config", "jieli", "settings.json"),
+    JSON.stringify({ api_key: "settings-key", base_url: "https://settings.example.test/" }),
+    "utf8",
+  );
+  await withEnv({ HOME: settingsHome, JIELI_API_KEY: undefined, CLAUDE_PLUGIN_OPTION_API_KEY: undefined, JIELI_BASE_URL: undefined }, async () => {
+    assert.deepEqual(runtime.missingConfigVars(), []);
+    assert.equal(runtime.requiredEnv("JIELI_API_KEY", "CLAUDE_PLUGIN_OPTION_API_KEY"), "settings-key");
+    assert.equal(runtime.optionalEnv("JIELI_BASE_URL", "CLAUDE_PLUGIN_OPTION_BASE_URL"), "https://settings.example.test");
+  });
+  await withEnv({ HOME: settingsHome, JIELI_API_KEY: "env-key", JIELI_BASE_URL: "https://env.example.test/" }, async () => {
+    assert.equal(runtime.requiredEnv("JIELI_API_KEY", "CLAUDE_PLUGIN_OPTION_API_KEY"), "env-key");
+    assert.equal(runtime.optionalEnv("JIELI_BASE_URL", "CLAUDE_PLUGIN_OPTION_BASE_URL"), "https://env.example.test/");
   });
 
   const { server, state } = createMockJieliServer();

@@ -268,7 +268,41 @@ test("normalizes Codex repo metadata, data URL images, local image events, and a
     assert.equal(first, "https://jieli.example.test/attachments/cached.png");
     assert.equal(second, "https://jieli.example.test/attachments/cached.png");
     assert.deepEqual(calls, [imagePath]);
+
+    const failingCalls = [];
+    const failingUpload = async (path) => {
+      failingCalls.push(path);
+      throw new Error("backend is down");
+    };
+    const otherImage = join(tmp, "2.png");
+    writeFileSync(otherImage, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
+    await assert.rejects(() => runtime.uploadAttachmentCached(otherImage, "https://jieli.example.test/", "secret", failingUpload), /backend is down/);
+    await assert.rejects(() => runtime.uploadAttachmentCached(otherImage, "https://jieli.example.test/", "secret", failingUpload), /backend is down/);
+    assert.deepEqual(failingCalls, [otherImage, otherImage]);
   });
+});
+
+test("keeps the existing image label when the Codex uploader fails instead of inserting a placeholder", async () => {
+  const tmp = makeTempDir();
+  const imagePath = join(tmp, "1.png");
+  writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const transcript = join(tmp, "session.jsonl");
+  writeJsonl(transcript, [
+    { type: "session_meta", payload: { id: "codex-image-fallback", cwd: "/Users/alice/work/jieli" } },
+    { type: "event_msg", payload: { type: "user_message", message: "ok [Image #1] what is this?", images: [], local_images: [imagePath], text_elements: [{ placeholder: "[Image #1]" }] } },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook(
+    { session_id: "codex-image-fallback", transcript_path: transcript },
+    "https://jieli.example.test",
+    async () => {
+      throw new Error("backend is down");
+    },
+  );
+
+  assert.equal(payload.thread.messages.length, 1);
+  assert.equal(payload.thread.messages[0].content, "ok [Image #1] what is this?");
+  assert.doesNotMatch(JSON.stringify(payload), /\[Image unavailable\]/);
 });
 
 test("configuration, upload, lock, session mapping, and missing transcript behavior match Codex hooks", async () => {
@@ -287,6 +321,11 @@ test("configuration, upload, lock, session mapping, and missing transcript behav
     assert.deepEqual(runtime.missingConfigVars(), []);
     assert.equal(runtime.requiredEnv("JIELI_API_KEY"), "settings-key");
     assert.equal(runtime.optionalEnv("JIELI_BASE_URL"), "https://jieli.example.test");
+  });
+
+  await withEnv({ HOME: tmp, JIELI_API_KEY: "env-key", JIELI_BASE_URL: "https://env.example.test/" }, async () => {
+    assert.equal(runtime.requiredEnv("JIELI_API_KEY"), "env-key");
+    assert.equal(runtime.optionalEnv("JIELI_BASE_URL"), "https://env.example.test");
   });
 
   await withEnv({ HOME: tmp }, async () => {
