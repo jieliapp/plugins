@@ -481,7 +481,7 @@ test("plugin wrappers, skills, docs, manifests, and hooks describe the split Jie
 
   const manifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   assert.equal(manifest.name, "jieli");
-  assert.equal(manifest.interface.displayName, "Jieli Codex Sync");
+  assert.equal(manifest.interface.displayName, "Jieli Sync");
   assert.equal("displayName" in manifest, false);
   assert.equal("userConfig" in manifest, false);
 

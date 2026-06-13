@@ -1,4 +1,4 @@
-# Jieli Codex Sync
+# Jieli Sync
 
 Sync local Codex sessions to Jieli threads, redact common secrets before upload, provide `jieli-read` and `jieli-find` skills for reading/searching synced threads, and add best-effort `Jieli-Thread` trailers to Codex-created git commits.
 

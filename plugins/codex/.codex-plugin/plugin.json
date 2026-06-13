@@ -13,9 +13,9 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Jieli Codex Sync",
+    "displayName": "Jieli Sync",
     "shortDescription": "Sync Codex sessions to Jieli.",
-    "longDescription": "Jieli Codex Sync uploads local Codex session transcripts to Jieli, redacts common secrets, provides jieli-read and jieli-find skills, and adds best-effort Jieli-Thread trailers to Codex-created git commits.",
+    "longDescription": "Jieli Sync uploads local Codex session transcripts to Jieli, redacts common secrets, provides jieli-read and jieli-find skills, and adds best-effort Jieli-Thread trailers to Codex-created git commits.",
     "developerName": "Jieli",
     "category": "Productivity",
     "brandColor": "#ffd21a",
