@@ -26,19 +26,21 @@ Do not use this skill for ordinary status updates or to read/search other thread
 
 ### 1. Resolve current session metadata
 
-Run the helper exactly as a plain command so the `PreToolUse` hook can inject the current `session_id`, `transcript_path`, and `cwd`:
-
-```bash
-jieli-handoff-info
-```
-
-If that command is not found or does not print valid JSON, resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run the bundled fallback helper:
+First resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run the bundled helper:
 
 ```bash
 node <resolved-skill-dir>/../../scripts/jieli_helper.mjs handoff-info
 ```
 
-The fallback is a single Node entrypoint that loads the plugin runtime directly. Do not enumerate plugin cache directories, choose wrapper files, or sort installed helpers in this skill.
+This is the primary path. It loads the plugin runtime directly and uses the most recent hook context persisted by the plugin.
+
+If the bundled helper is not available or does not print valid JSON, then try the plain helper command so the `PreToolUse` hook may inject the current `session_id`, `transcript_path`, and `cwd`:
+
+```bash
+jieli-handoff-info
+```
+
+Do not enumerate plugin cache directories, choose wrapper files, or sort installed helpers in this skill.
 
 Expected JSON shape:
 
