@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger sessionstart --jieli-hook",
+            "command": "node \"${PLUGIN_ROOT}/scripts/sync.mjs\" --trigger sessionstart --jieli-hook",
             "statusMessage": "Syncing Codex session to Jieli"
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger precompact --jieli-hook",
+            "command": "node \"${PLUGIN_ROOT}/scripts/sync.mjs\" --trigger precompact --jieli-hook",
             "statusMessage": "Syncing Codex session to Jieli"
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/sync.py\" --trigger stop --jieli-hook",
+            "command": "node \"${PLUGIN_ROOT}/scripts/sync.mjs\" --trigger stop --jieli-hook",
             "statusMessage": "Syncing Codex session to Jieli"
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/commit_trailer.py\" --jieli-hook",
+            "command": "node \"${PLUGIN_ROOT}/scripts/commit_trailer.mjs\" --jieli-hook",
             "statusMessage": "Adding Jieli commit trailer"
           }
         ]

@@ -24,7 +24,7 @@ Do not use this skill when the user only gives keywords, repo names, file names,
 
 ## Environment
 
-Use the `jieli-read-thread` command for thread reads. It is installed from the plugin `bin/` directory and resolves the plugin scripts path itself. Do not call `python3 "$CLAUDE_PLUGIN_ROOT/scripts/read_thread.py"` from Bash, and do not guess cache paths such as `skills/jieli/scripts/read_thread.py`.
+Use the `jieli-read-thread` command for thread reads. It is installed from the plugin `bin/` directory and resolves the plugin scripts path itself. Do not call plugin scripts by cache path, and do not guess paths such as `skills/jieli/scripts/read_thread.mjs`.
 
 If the API key is missing, ask the user to configure the plugin, export `JIELI_API_KEY`, or write `~/.config/jieli/settings.json`.
 

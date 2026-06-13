@@ -4,8 +4,8 @@ PLUGIN_CREATOR_DIR ?= $(HOME)/Library/Mobile Documents/com~apple~CloudDocs/dotfi
 VALIDATOR_DEPS_DIR ?= /tmp/codex-plugin-validator-pyyaml
 
 test:
-	python3 -m unittest plugins/claude-code/tests/test_plugin_scripts.py
-	python3 -m unittest plugins/codex/tests/test_plugin_scripts.py
+	node --test plugins/claude-code/tests/runtime-node.test.mjs
+	node --test plugins/codex/tests/runtime-node.test.mjs
 
 validate:
 	claude plugin validate . --strict

@@ -56,15 +56,18 @@ Configure the API key. Recommended for Codex and Claude Code: write `~/.config/j
 
 ```bash
 mkdir -p ~/.config/jieli
-python3 - <<'PY'
-import json
-from pathlib import Path
+node - <<'JS'
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
-path = Path.home() / ".config/jieli/settings.json"
-settings = {"api_key": "your-jieli-api-key", "base_url": "https://jieli.app"}
-path.write_text(json.dumps(settings, indent=2) + "\n")
-path.chmod(0o600)
-PY
+const settingsPath = path.join(os.homedir(), ".config", "jieli", "settings.json");
+fs.writeFileSync(
+  settingsPath,
+  JSON.stringify({ api_key: "your-jieli-api-key", base_url: "https://jieli.app" }, null, 2) + "\n",
+  { mode: 0o600 },
+);
+JS
 ```
 
 You can also use environment variables before starting Codex:

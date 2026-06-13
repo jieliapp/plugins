@@ -24,7 +24,7 @@ Do not use this skill when the user only gives keywords, repo names, file names,
 
 ## Environment
 
-Use the `jieli-read-thread` command for thread reads. It is installed from the plugin `bin/` directory and resolves the plugin scripts path itself. Do not call `python3 "$ROOT/scripts/read_thread.py"` from Bash, and do not guess cache paths such as `skills/jieli/scripts/read_thread.py`.
+Use the `jieli-read-thread` command for thread reads. It is installed from the plugin `bin/` directory and resolves the plugin scripts path itself. Do not call plugin scripts by cache path, and do not guess paths such as `skills/jieli/scripts/read_thread.mjs`.
 
 If the API key is missing, ask the user for a Jieli API key and write it to `~/.config/jieli/settings.json` with mode `600`.
 
@@ -41,15 +41,18 @@ Use:
 
 ```bash
 mkdir -p ~/.config/jieli
-python3 - <<'PY'
-import json
-from pathlib import Path
+node - <<'JS'
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
-path = Path.home() / ".config/jieli/settings.json"
-settings = {"api_key": "<api-key-from-jieli.app>", "base_url": "https://jieli.app"}
-path.write_text(json.dumps(settings, indent=2) + "\n")
-path.chmod(0o600)
-PY
+const settingsPath = path.join(os.homedir(), ".config", "jieli", "settings.json");
+fs.writeFileSync(
+  settingsPath,
+  JSON.stringify({ api_key: "<api-key-from-jieli.app>", base_url: "https://jieli.app" }, null, 2) + "\n",
+  { mode: 0o600 },
+);
+JS
 ```
 
 Replace the placeholder before writing the file.

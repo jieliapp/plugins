@@ -5,12 +5,12 @@ on:
   pull_request:
 
 jobs:
-  python:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - run: python3 -m unittest plugins/claude-code/tests/test_plugin_scripts.py
-      - run: python3 -m unittest plugins/codex/tests/test_plugin_scripts.py
+          node-version: "22"
+      - run: node --test plugins/claude-code/tests/runtime-node.test.mjs
+      - run: node --test plugins/codex/tests/runtime-node.test.mjs

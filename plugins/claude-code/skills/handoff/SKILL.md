@@ -115,15 +115,14 @@ Write the full handoff prompt to a temp file, but do not print the full prompt i
 - With a thread id: `OUT="/tmp/handoff-$THREAD_ID.md"`
 - Without a thread id: derive a short slug from the user goal if present, otherwise from the handoff summary title, and use `OUT="/tmp/handoff-$SLUG.md"`.
 
-Use a safe writer, for example Python, so prompt content cannot break a shell here-doc:
+Use a safe writer, for example Node, so prompt content cannot break a shell here-doc:
 
 ```bash
-python3 - "$OUT" <<'PY'
-import sys
-from pathlib import Path
-Path(sys.argv[1]).write_text("""<assembled handoff prompt>
-""", encoding="utf-8")
-PY
+node - "$OUT" <<'JS'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], `<assembled handoff prompt>
+`, "utf8");
+JS
 echo "Wrote handoff to $OUT"
 ```
 

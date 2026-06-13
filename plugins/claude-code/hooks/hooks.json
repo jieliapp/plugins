@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger sessionstart --jieli-hook"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.mjs\" --trigger sessionstart --jieli-hook"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger precompact --jieli-hook"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.mjs\" --trigger precompact --jieli-hook"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.py\" --trigger stop --jieli-hook"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync.mjs\" --trigger stop --jieli-hook"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/commit_trailer.py\" --jieli-hook"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/commit_trailer.mjs\" --jieli-hook"
           }
         ]
       }

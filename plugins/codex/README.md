@@ -8,15 +8,18 @@ Recommended: write `~/.config/jieli/settings.json`. This works even after Codex 
 
 ```bash
 mkdir -p ~/.config/jieli
-python3 - <<'PY'
-import json
-from pathlib import Path
+node - <<'JS'
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
-path = Path.home() / ".config/jieli/settings.json"
-settings = {"api_key": "your-jieli-api-key", "base_url": "https://jieli.app"}
-path.write_text(json.dumps(settings, indent=2) + "\n")
-path.chmod(0o600)
-PY
+const settingsPath = path.join(os.homedir(), ".config", "jieli", "settings.json");
+fs.writeFileSync(
+  settingsPath,
+  JSON.stringify({ api_key: "your-jieli-api-key", base_url: "https://jieli.app" }, null, 2) + "\n",
+  { mode: 0o600 },
+);
+JS
 ```
 
 Jieli defaults to `https://jieli.app`.
@@ -68,6 +71,6 @@ Hook errors are appended to:
 ## Development
 
 ```bash
-python3 -m unittest plugins/codex/tests/test_plugin_scripts.py
+node --test plugins/codex/tests/runtime-node.test.mjs
 python3 /path/to/plugin-creator/scripts/validate_plugin.py plugins/codex
 ```
