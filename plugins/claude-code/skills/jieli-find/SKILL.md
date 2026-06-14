@@ -5,16 +5,6 @@ description: "Search prior Jieli threads by keywords, repo, file, topic, or othe
 
 # Jieli Find
 
-## When to Use
-
-Use this skill immediately when:
-
-- The user asks to find/search previous Jieli threads.
-- The user asks which thread mentioned something.
-- The user gives keywords, repo names, file paths, topics, labels, or vague clues instead of a known thread id.
-
-Do not use this skill when the user already supplied a specific Jieli thread id or URL. Use `jieli-read` for known thread ids/URLs.
-
 ## Inputs
 
 - Search keywords or clue text.

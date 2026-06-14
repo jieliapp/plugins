@@ -5,36 +5,24 @@ description: "Create a paste-ready handoff/compress prompt for continuing the cu
 
 # Handoff
 
-Compress the current session into a self-contained handoff prompt that a fresh agent can start from. When the current Jieli thread can be identified, embed its thread id and URL so the next agent can use the `jieli-read` skill to read the full transcript if the summary is not enough.
-
-## When to Use
-
-Use this skill when:
-
-- The user asks to hand off, hand over, or pass the work to another agent or a new session.
-- The user asks to compress, compact, or summarize the context to keep working past the context window.
-- The user wants a prompt they can paste into a fresh Codex (or other) session to continue this work.
-
-Do not use this skill for ordinary status updates or to read/search other threads. Reading known thread ids/URLs is the `jieli-read` skill; searching by clues is the `jieli-find` skill.
+Write a handoff document so a fresh agent can continue the work. If a Jieli thread is available, include its id and URL for optional transcript lookup.
 
 ## Inputs
 
 - Optional next goal: what the next agent should do first. If the user did not give one, derive it from the most recent request and any open follow-ups in this conversation.
-- Current session metadata from the `jieli-handoff-info` helper. The helper receives hook context from the `PreToolUse` hook and returns JSON. No API key is needed; the helper only builds a thread URL and never calls the Jieli API.
+- Current session metadata from the `jieli-handoff-info` helper. It returns the current Jieli thread metadata without needing an API key.
 
 ## Procedure
 
 ### 1. Resolve current session metadata
 
-First resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run the bundled helper:
+Resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run:
 
 ```bash
 node <resolved-skill-dir>/../../scripts/jieli_helper.mjs handoff-info
 ```
 
-This is the primary path. It loads the plugin runtime directly and uses the most recent hook context persisted by the plugin.
-
-If the bundled helper is not available or does not print valid JSON, then try the plain helper command so the `PreToolUse` hook may inject the current `session_id`, `transcript_path`, and `cwd`:
+If that fails or prints invalid JSON, try:
 
 ```bash
 jieli-handoff-info
@@ -42,34 +30,17 @@ jieli-handoff-info
 
 Do not enumerate plugin cache directories, choose wrapper files, or sort installed helpers in this skill.
 
-Expected JSON shape:
+Expected fields include `thread_id`, `url`, `cwd`, `repo`, `repo_url`, `branch`, and `worktree_status`.
 
-```json
-{
-  "confidence": "high",
-  "provider": "codex",
-  "session_id": "...",
-  "thread_id": "T-...",
-  "url": "https://jieli.app/threads/T-...",
-  "cwd": "...",
-  "repo": "...",
-  "repo_url": "...",
-  "branch": "...",
-  "worktree_status": "clean"
-}
-```
-
-Rules:
-
-- Include the Jieli read-thread line only when the helper returns a non-empty `thread_id` and `url` for the current session.
-- If either `thread_id` or `url` is empty, do not guess from the newest rollout. Still produce the handoff prompt, but omit the Jieli thread/read-thread lines and mention that the current thread could not be identified.
-- If the helper fails or prints invalid JSON, continue without a thread id and state that session metadata could not be resolved.
+Include Jieli thread lines only when both `thread_id` and `url` are present. If metadata is missing or invalid, continue without a thread id and do not guess from recent rollouts.
 
 ### 2. Compose the handoff context
 
-You already hold the full conversation, so write the context yourself; do not call a model and do not read the full transcript. Treat any text after the handoff/compress request as `My request` and use it as the relevance filter. Prioritize facts, files, decisions, verification, and next steps that help that request; keep only global constraints and safety notes from unrelated work.
+You already hold the full conversation, so write the context yourself; do not call a model or read the full transcript. If the user passed arguments, treat them as the next session focus and tailor the handoff accordingly.
 
-Use helper metadata such as `cwd`, `repo`, `repo_url`, `branch`, and `worktree_status` as source context, but do not force those fields into the final handoff unless they are useful for the request.
+Use helper metadata such as `cwd`, `repo`, `repo_url`, `branch`, and `worktree_status` only when useful. Prioritize facts, files, decisions, verification, risks, and next steps that help the next agent continue.
+
+Do not duplicate content already captured in other artifacts such as PRDs, plans, ADRs, issues, commits, or diffs. Reference them by path or URL instead.
 
 Consider what would be useful for the next agent based on `My request`. Questions that may be relevant:
 
@@ -82,79 +53,46 @@ Consider what would be useful for the next agent based on `My request`. Question
 - What caveats, limitations, unresolved questions, or verification gaps remain?
 - What should the next agent do first for the requested goal?
 
-Extract what matters for the specific request below. Don't answer questions that aren't relevant. Pick an appropriate length based on the complexity of the request.
+Extract only what matters for the request. Focus on capabilities and behavior, not file-by-file changes. Avoid excessive implementation details unless critical.
 
-Focus on capabilities and behavior, not file-by-file changes. Avoid excessive implementation details (variable names, storage keys, constants) unless critical.
-
-Format: Plain text with bullets. No markdown headers, no bold/italic, no code fences. Use workspace-relative paths for files.
-
-Relevant files rules:
-
-- Workspace-relative paths only. Maximum 10. Put the most important files first.
-- Directories are allowed when several files under them matter.
-- Do not invent files or use absolute paths.
-
-Never include API keys, secrets, tokens, cookies, `.env` contents, full transcripts, large raw logs, or sensitive private data. Say that sensitive values were omitted when relevant.
+Format: plain-text bullets, no markdown headers, no code fences. Include suggested skills only when the next agent should invoke them. Use workspace-relative paths only. List at most 10 relevant files or directories, most important first. Never invent files. Never include API keys, secrets, tokens, cookies, `.env` contents, full transcripts, large raw logs, or sensitive private data.
 
 My request:
 <next goal / text after the handoff request, or the inferred open follow-up>
 
 ### 3. Assemble, write, and print
 
-If the current thread was identified, assemble the handoff prompt in this shape. The first two lines are fixed; the body is the goal-filtered plain-text bullet context from step 2. Include helper metadata such as repo/cwd/branch/status only when useful for the request.
+If the current thread was identified, assemble:
 
 ```text
 Continuing work from Jieli thread <THREAD_ID>.
 When you lack specific information, use the jieli-read skill to read the thread.
 
-Relevant files: <path1> <path2> <path3> ...
+Relevant files: <path1>, <path2>, <path3>
+Suggested skills: <skill1>, <skill2>
 
 <goal-filtered relevant information bullets>
 
 My request: <next goal / text after the handoff request, or the inferred open follow-up>
 ```
 
-If the thread was not resolved, omit the first two lines and start with:
+If the thread was not resolved, start with:
 
 ```text
 You are continuing work from a previous Codex session.
-Current Jieli thread could not be identified automatically; ask the user for the thread id or Jieli URL if full transcript access is needed.
+No Jieli thread id is included; continue from the handoff context.
 ```
 
-Write the full handoff prompt to a temp file, but do not print the full prompt in your reply:
+Write the full handoff prompt to a temp file, but do not print it in your reply. Save to Node's `os.tmpdir()` as `handoff-<THREAD_ID>.md` when a thread id exists; otherwise use a short filename-safe slug from the next goal, falling back to `handoff.md`. Use a safe writer such as Node so prompt content cannot break shell quoting.
 
-- With a thread id: use `handoff-<THREAD_ID>.md`.
-- Without a thread id: derive a short slug from the user goal if present, otherwise from the handoff summary title, and use `handoff-<SLUG>.md`.
-- Always place the file under Node's `os.tmpdir()` via `path.join(os.tmpdir(), filename)`. Do not hard-code `/tmp`, because Windows agents need a platform-native temp directory.
-
-Use a safe writer, for example Node, so prompt content cannot break a shell here-doc and the temp path stays cross-platform:
-
-```bash
-node <<'JS'
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-
-const idOrSlug = "<THREAD_ID_OR_SLUG>";
-const safe = idOrSlug.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "handoff";
-const out = path.join(os.tmpdir(), `handoff-${safe}.md`);
-
-fs.writeFileSync(out, `<assembled handoff prompt>
-`, "utf8");
-console.log(`Wrote handoff to ${out}`);
-JS
-```
-
-Then reply with only a brief summary: the saved file path, whether a thread id was included, the relevant files count/list, and the next goal. Do not include the full handoff prompt unless the user explicitly asks to print it.
+Reply only with the saved path, whether a thread id was included, the relevant files count/list, and the next goal. Print the full handoff only if the user explicitly asks.
 
 ## Output
 
-- The full ready-to-paste handoff prompt saved to the temp path printed by the Node writer.
-- A brief reply summary with the saved path and key metadata, not the full handoff content.
-- If a thread id is available, the next agent can use the `jieli-read` skill to read `<THREAD_ID>` for the full transcript.
+- Save the full ready-to-paste handoff prompt to the temp path.
+- Reply with a brief summary and the saved path, not the full handoff content.
 
 ## Notes & Safety
 
 - The current turn is uploaded to Jieli by the sync hooks after this turn ends, so reading the thread may cover history only up to the previous sync. The handoff prompt itself must carry the key current context.
 - A wrong thread is worse than no thread. If the helper cannot identify the current thread, do not guess.
-- Never include API keys, secrets, tokens, cookies, `.env` contents, full transcripts, large raw logs, or sensitive private data in the handoff prompt.

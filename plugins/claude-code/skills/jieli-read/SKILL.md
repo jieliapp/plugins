@@ -5,16 +5,6 @@ description: "Read a specific known Jieli /threads/T-<uuid> link or raw T-<uuid>
 
 # Jieli Read
 
-## When to Use
-
-Use this skill immediately when:
-
-- The user pastes or references a Jieli thread URL whose path contains `/threads/<thread_id>`, including relative links like `/threads/T-...` and export links like `/threads/<thread_id>.md` or `/threads/<thread_id>.json`.
-- The user references a raw provider thread id, such as `T-...`.
-- The user asks to apply, summarize, continue, compare, or reuse work from a specific known Jieli thread.
-
-Do not use this skill when the user only gives keywords, repo names, file names, or vague clues. Use `jieli-find` first for search/discovery. Do not use this skill for the current conversation when the needed context is already visible.
-
 ## Inputs
 
 - A Jieli URL such as `https://jieli.app/threads/<provider_thread_id>`, `https://jieli.app/threads/<provider_thread_id>.md`, or a raw provider thread id.
