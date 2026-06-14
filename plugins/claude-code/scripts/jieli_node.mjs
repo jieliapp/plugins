@@ -560,7 +560,7 @@ function normalizeToolResultBlock(block) {
   const result = run.result && typeof run.result === "object" ? run.result : run.result;
   const output = toolResultOutput(result, content);
   const exitCode = toolResultExitCode(result);
-  const out = { type: "tool_result", content };
+  const out = { type: "tool_result", content: "" };
   if (typeof toolUseId === "string" && toolUseId) out.tool_use_id = toolUseId;
   out.run = {
     status: normalizeToolStatus(run.status, redacted.is_error),

@@ -137,6 +137,7 @@ test("builds Codex payload from JSONL while redacting and skipping private items
   assert.equal(payload.thread.title, "sync OPENAI_API_KEY=[REDACTED:openai-api-key]");
   assert.deepEqual(payload.thread.messages.map((message) => message.role), ["user", "assistant", "assistant", "tool"]);
   assert.deepEqual(payload.thread.messages[2].content[0], { type: "tool_use", id: "call-1", name: "shell_command", input: { command: "git status", cwd: "" } });
+  assert.equal(payload.thread.messages[3].content[0].content, "");
   assert.equal(payload.thread.messages[3].content[0].run.result.output, "Authorization: Bearer [REDACTED:authorization-bearer]");
   const raw = JSON.stringify(payload);
   assert.match(raw, /\[REDACTED:/);
@@ -193,11 +194,13 @@ test("normalizes Codex apply_patch, exec_command, and nonzero tool exits", async
   assert.deepEqual(patchUse, { type: "tool_use", id: "call-patch", name: "apply_patch", input: { patch_text: patchText } });
   const patchResult = payload.thread.messages[2].content[0];
   assert.equal(patchResult.tool_use_id, "call-patch");
-  assert.match(patchResult.content, /Success\. Updated route_test\.go/);
+  assert.equal(patchResult.content, "");
+  assert.match(patchResult.run.result.output, /Success\. Updated route_test\.go/);
   const shellUse = payload.thread.messages[3].content[0];
   assert.deepEqual(shellUse.input, { command: "git status --short --branch", cwd: "/Users/alice/work/jieli" });
   assert.equal(shellUse.name, "shell_command");
   const shellResult = payload.thread.messages[4].content[0];
+  assert.equal(shellResult.content, "");
   assert.equal(shellResult.run.status, "error");
   assert.equal(shellResult.run.result.exitCode, 1);
 });

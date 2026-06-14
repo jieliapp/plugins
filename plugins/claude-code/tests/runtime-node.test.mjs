@@ -237,6 +237,7 @@ test("builds Claude payload from JSONL while redacting secrets and preserving to
   assert.deepEqual(payload.thread.messages.map((message) => message.role), ["user", "assistant", "assistant", "tool"]);
   assert.deepEqual(payload.thread.messages[1].usage, { totalInputTokens: 25, maxInputTokens: 100 });
   const toolResult = payload.thread.messages[3].content[0];
+  assert.equal(toolResult.content, "");
   assert.equal(toolResult.tool_use_id, "tool-1");
   assert.equal(toolResult.run.status, "error");
   assert.equal(toolResult.run.result.output, "Authorization: Bearer [REDACTED:authorization-bearer]");
