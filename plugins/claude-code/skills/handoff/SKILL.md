@@ -80,7 +80,6 @@ If the thread was not resolved, start with:
 
 ```text
 You are continuing work from a previous Claude Code session.
-No Jieli thread id is included; continue from the handoff context.
 ```
 
 Write the full handoff prompt to a temp file, but do not print it in your reply. Save to Node's `os.tmpdir()` as `handoff-<THREAD_ID>.md` when a thread id exists; otherwise use a short filename-safe slug from the next goal, falling back to `handoff.md`. Use a safe writer such as Node so prompt content cannot break shell quoting.
