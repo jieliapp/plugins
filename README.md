@@ -4,55 +4,27 @@ Plugins for syncing AI coding sessions to [Jieli](https://jieli.app).
 
 ## Claude Code Install
 
-Add the marketplace in Claude Code:
-
-```text
-/plugin marketplace add jieliapp/plugins
-```
-
-Install the plugin:
-
-```text
-/plugin install jieli@jieliapp
-```
-
-Then get an API key from [https://jieli.app](https://jieli.app) and configure it for Claude Code.
-
-When Claude Code opens the plugin configuration screen, set:
-
-```text
-Jieli API key = your-jieli-api-key
-```
-
-Reload plugins:
-
-```text
-/reload-plugins
-```
-
-You can also set it through your shell environment before starting Claude Code:
+Run these in your shell:
 
 ```bash
-export JIELI_API_KEY="your-jieli-api-key"
+claude plugin marketplace add jieliapp/plugins
+claude plugin install jieli@jieliapp
 ```
 
 ## Codex Install
 
-Add the marketplace in Codex:
+Run these in your shell:
 
 ```bash
 codex plugin marketplace add jieliapp/plugins
-```
-
-Install the plugin:
-
-```bash
 codex plugin add jieli@jieliapp
 ```
 
 Then enable the plugin and trust its hooks with `/hooks`.
 
-Configure the API key. Recommended for Codex and Claude Code: write `~/.config/jieli/settings.json`, which works even after the agent is already running:
+## Configure the API key
+
+Get an API key from [https://jieli.app](https://jieli.app). Recommended for both Claude Code and Codex: write `~/.config/jieli/settings.json`, which works even after the agent is already running:
 
 ```bash
 mkdir -p ~/.config/jieli
@@ -70,7 +42,7 @@ fs.writeFileSync(
 JS
 ```
 
-You can also use environment variables before starting Codex:
+You can also use an environment variable before starting the agent:
 
 ```bash
 export JIELI_API_KEY="your-jieli-api-key"
