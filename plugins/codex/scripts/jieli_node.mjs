@@ -15,6 +15,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { captureSummaryStatsBaseline, summaryStatsForUpload } from "./summary_stats.mjs";
 
 const PROVIDER = "codex";
 const DEFAULT_BASE_URL = "https://jieli.app";
@@ -387,7 +388,9 @@ async function syncMain(args) {
   const opts = parseArgs(args, { boolean: new Set(["jieli-hook"]) });
   try {
     const hookData = loadHookStdin();
+    hookData.trigger = opts.trigger || "";
     writeHandoffContext(hookData);
+    captureBaselineFromHook(hookData, opts.trigger || "");
     const missing = missingConfigVars();
     if (missing.length) {
       const response = buildMissingConfigHookResponse(opts.trigger || "", missing);
@@ -445,6 +448,24 @@ async function buildPayloadFromHook(hookData, baseUrl = null, imageUploader = nu
     updated_ms: transcript.updated_ms || 0,
     messages,
   };
+  if (String(hookData.trigger || "").toLowerCase() === "sessionstart") {
+    captureSummaryStatsBaseline({
+      provider: PROVIDER,
+      threadId: providerThreadId,
+      sessionId,
+      cwd,
+      trigger: "sessionstart",
+    });
+  }
+  const summaryStats = summaryStatsForUpload({
+    provider: PROVIDER,
+    threadId: providerThreadId,
+    sessionId,
+    cwd,
+    messageCount: messages.length,
+    trigger: hookData.trigger || "upload",
+  });
+  if (summaryStats) thread.summaryStats = summaryStats;
   return {
     provider: PROVIDER,
     repo: "",
@@ -1267,6 +1288,7 @@ function commitTrailerMain(args) {
 }
 
 function buildHookResponse(hookData) {
+  captureBaselineFromHook(hookData, "pretooluse");
   const shell = normalizeShellHook(hookData);
   if (!shell) return {};
   let updated = updatedHandoffCommand(shell.command, {
@@ -1283,6 +1305,22 @@ function buildHookResponse(hookData) {
       updatedInput: buildUpdatedHookInput(shell, updated),
     },
   };
+}
+
+function captureBaselineFromHook(hookData, trigger) {
+  const hookSessionId = String(hookData?.session_id || "").trim();
+  const transcriptPath = String(hookData?.transcript_path || hookData?.session_path || "").trim();
+  const meta = readSessionMeta(transcriptPath);
+  const sessionId = meta.id || hookSessionId;
+  const cwd = String(hookData?.cwd || "").trim();
+  if (!sessionId || !cwd) return;
+  captureSummaryStatsBaseline({
+    provider: PROVIDER,
+    threadId: jieliThreadId(sessionId),
+    sessionId,
+    cwd,
+    trigger,
+  });
 }
 
 function normalizeShellHook(hookData, allowedTools = SHELL_TOOL_NAMES) {
@@ -1766,6 +1804,7 @@ export {
   buildQuotaExceededHookResponse,
   buildUpdatedHookInput,
   buildPayloadFromHook,
+  captureSummaryStatsBaseline,
   createCommandRuntime,
   fetchThreadExport,
   fetchThreads,
@@ -1783,6 +1822,7 @@ export {
   redactText,
   releaseSyncLock,
   requiredEnv,
+  summaryStatsForUpload,
   uploadAttachmentCached,
   uploadAttachmentData,
   uploadPayload,

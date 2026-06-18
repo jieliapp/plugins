@@ -270,6 +270,101 @@ test("builds repo metadata from git remote without inferring repo from local fol
   const localPayload = await runtime.buildPayloadFromHook({ session_id: "cc-local", transcript_path: localTranscript }, "https://jieli.example.test");
   assert.equal(localPayload.repo, "");
   assert.equal(localPayload.repo_url, "");
+  assert.equal("summaryStats" in localPayload.thread, false);
+});
+
+test("adds Claude summaryStats from Git tree diff when shell-created files are not in transcript", async () => {
+  const home = makeTempDir();
+  const repo = join(home, "repo");
+  mkdirSync(repo);
+  spawnSync("git", ["init"], { cwd: repo, stdio: "ignore" });
+  spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: repo, stdio: "ignore" });
+  spawnSync("git", ["config", "user.name", "Test User"], { cwd: repo, stdio: "ignore" });
+  writeFileSync(join(repo, "README.md"), "hello\n", "utf8");
+  spawnSync("git", ["add", "README.md"], { cwd: repo, stdio: "ignore" });
+  spawnSync("git", ["commit", "-m", "init"], { cwd: repo, stdio: "ignore" });
+
+  const transcript = join(home, "session.jsonl");
+  writeJsonl(transcript, [
+    { type: "user", uuid: "u-summary", sessionId: "cc-summary", cwd: repo, gitBranch: "main", message: { role: "user", content: "generate files" } },
+  ]);
+
+  await withEnv({ HOME: home }, async () => {
+    runtime.captureSummaryStatsBaseline({
+      provider: "claude_code",
+      threadId: "T-cc-summary",
+      sessionId: "cc-summary",
+      cwd: repo,
+      trigger: "sessionstart",
+    });
+    writeFileSync(join(repo, "generated-a.txt"), "one\ntwo\n", "utf8");
+    writeFileSync(join(repo, "generated-b.txt"), "three\n", "utf8");
+
+    const statusBefore = spawnSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).stdout;
+    const payload = await runtime.buildPayloadFromHook({ session_id: "cc-summary", transcript_path: transcript, cwd: repo }, "https://jieli.example.test");
+    const statusAfter = spawnSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).stdout;
+
+    assert.equal(statusAfter, statusBefore);
+    assert.deepEqual(payload.thread.summaryStats.diffStats, { added: 3, deleted: 0, changed: 0 });
+    assert.equal(payload.thread.summaryStats.filesChanged, 2);
+    assert.equal(payload.thread.summaryStats.messageCount, 1);
+    assert.equal(payload.thread.summaryStats.source, "git_tree_diff");
+    assert.equal(payload.thread.summaryStats.complete, true);
+    assert.equal(payload.thread.summaryStats.repoCount, 1);
+    assert.match(payload.thread.summaryStats.baseTree, /^[0-9a-f]{40}$/);
+    assert.match(payload.thread.summaryStats.currentTree, /^[0-9a-f]{40}$/);
+    assert.doesNotMatch(JSON.stringify(payload.thread.summaryStats), /generated-a|generated-b|jieli-node-test/);
+
+    spawnSync("git", ["add", "generated-a.txt", "generated-b.txt"], { cwd: repo, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "generated"], { cwd: repo, stdio: "ignore" });
+    assert.equal(spawnSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).stdout, "");
+    const cleanPayload = await runtime.buildPayloadFromHook({ session_id: "cc-summary", transcript_path: transcript, cwd: repo }, "https://jieli.example.test");
+    assert.deepEqual(cleanPayload.thread.summaryStats.diffStats, { added: 3, deleted: 0, changed: 0 });
+    assert.equal(cleanPayload.thread.summaryStats.filesChanged, 2);
+  });
+});
+
+test("aggregates Claude summaryStats for workspace parents without uploading repo paths", async () => {
+  const home = makeTempDir();
+  const workspace = join(home, "workspace");
+  const repoA = join(workspace, "a");
+  const repoB = join(workspace, "b");
+  mkdirSync(repoA, { recursive: true });
+  mkdirSync(repoB, { recursive: true });
+  for (const repo of [repoA, repoB]) {
+    spawnSync("git", ["init"], { cwd: repo, stdio: "ignore" });
+    spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: repo, stdio: "ignore" });
+    spawnSync("git", ["config", "user.name", "Test User"], { cwd: repo, stdio: "ignore" });
+    writeFileSync(join(repo, "README.md"), "hello\n", "utf8");
+    spawnSync("git", ["add", "README.md"], { cwd: repo, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "init"], { cwd: repo, stdio: "ignore" });
+  }
+  const transcript = join(home, "session.jsonl");
+  writeJsonl(transcript, [
+    { type: "user", uuid: "u-multi", sessionId: "cc-multi", cwd: workspace, gitBranch: "main", message: { role: "user", content: "generate across repos" } },
+  ]);
+
+  await withEnv({ HOME: home }, async () => {
+    runtime.captureSummaryStatsBaseline({
+      provider: "claude_code",
+      threadId: "T-cc-multi",
+      sessionId: "cc-multi",
+      cwd: workspace,
+      trigger: "sessionstart",
+    });
+    writeFileSync(join(repoA, "a.txt"), "one\n", "utf8");
+    writeFileSync(join(repoB, "b.txt"), "two\nthree\n", "utf8");
+    const payload = await runtime.buildPayloadFromHook({ session_id: "cc-multi", transcript_path: transcript, cwd: workspace }, "https://jieli.example.test");
+
+    assert.deepEqual(payload.thread.summaryStats.diffStats, { added: 3, deleted: 0, changed: 0 });
+    assert.equal(payload.thread.summaryStats.filesChanged, 2);
+    assert.equal(payload.thread.summaryStats.repoCount, 2);
+    assert.equal(payload.thread.summaryStats.completeRepoCount, 2);
+    assert.match(payload.thread.summaryStats.baseTreeDigest, /^sha256:[0-9a-f]{64}$/);
+    assert.match(payload.thread.summaryStats.currentTreeDigest, /^sha256:[0-9a-f]{64}$/);
+    assert.equal("baseTree" in payload.thread.summaryStats, false);
+    assert.doesNotMatch(JSON.stringify(payload.thread.summaryStats), /workspace|a\.txt|b\.txt|jieli-node-test/);
+  });
 });
 
 test("normalizes Claude images and attachment cache behavior", async () => {

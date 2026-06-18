@@ -3,5 +3,14 @@ set -euo pipefail
 
 BIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd -- "$BIN_DIR/.." && pwd)"
+NODE_BIN="node"
+if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+  for candidate in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
+    if [ -x "$candidate" ]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
+fi
 
-exec node "$PLUGIN_ROOT/scripts/find_threads.mjs" "$@"
+exec "$NODE_BIN" "$PLUGIN_ROOT/scripts/find_threads.mjs" "$@"
