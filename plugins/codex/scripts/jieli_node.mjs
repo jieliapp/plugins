@@ -249,6 +249,18 @@ function buildMissingConfigHookResponse(trigger, missing) {
   };
 }
 
+function buildQuotaExceededHookResponse(trigger, error) {
+  if (String(trigger || "").toLowerCase() !== "sessionstart") return {};
+  const message = formatError(error);
+  if (!/\b409\b/.test(message) || !/quota/i.test(message)) return {};
+  return {
+    continue: true,
+    systemMessage:
+      "Jieli sync skipped: message quota exceeded. " +
+      "Upgrade your plan or enable auto-cleanup in jieli.app settings.",
+  };
+}
+
 function redactText(value) {
   let text = String(value || "").replace(/[\u{E0000}-\u{E007F}]/gu, "");
   text = redactUrls(text);
@@ -406,6 +418,8 @@ async function syncMain(args) {
       releaseSyncLock(lock);
     }
   } catch (error) {
+    const response = buildQuotaExceededHookResponse(opts.trigger || "", error);
+    if (Object.keys(response).length) console.log(JSON.stringify(response));
     logHookError(`sync ${opts.trigger || ""}: ${formatError(error)}`);
   }
   return 0;
@@ -728,7 +742,7 @@ function shouldSkipUserMessage(content) {
     "<local-command-caveat>",
     "<skill>",
     "Base directory for this skill:",
-    "# AGENTS.md instructions for ",
+    "# AGENTS.md instructions",
   ].some((prefix) => text.startsWith(prefix));
 }
 
@@ -1748,6 +1762,7 @@ export {
   buildHandoffInfo,
   buildHookResponse,
   buildMissingConfigHookResponse,
+  buildQuotaExceededHookResponse,
   buildUpdatedHookInput,
   buildPayloadFromHook,
   createCommandRuntime,

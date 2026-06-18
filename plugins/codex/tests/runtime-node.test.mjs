@@ -218,7 +218,7 @@ test("filters Codex handoff summaries, git directives, internal context, loaded 
     "- This compacted implementation detail should not be uploaded.\n".repeat(20);
   const finalText = '已提交：`abc1234 fix sync`\n\n::git-stage{cwd="/Users/alice/work/jieli"}\n::git-commit{cwd="/Users/alice/work/jieli"}\n';
   const userText = "# Files mentioned by the user:\n\n## codex-clipboard-ba43.png: /var/folders/T/codex-clipboard-ba43.png\n\n## My request for Codex:\nthreads list, hidden branch name, just show repo";
-  const agentsBlock = "# AGENTS.md instructions for /Users/alice/work/jieli <INSTRUCTIONS> #\n\n<INSTRUCTIONS>\n# AI AGENT PROTOCOLS v2.0\n</INSTRUCTIONS>";
+  const agentsBlock = "# AGENTS.md instructions\n\n<INSTRUCTIONS>\n# AI AGENT PROTOCOLS v2.0\n</INSTRUCTIONS>";
   const skillBlock = "<skill>\n<name>claude-code-setup:spec-driven-planning</name>\n<path>/Users/alice/skills/spec-driven-planning/SKILL.md</path>\n# Spec-Driven Planning\n</skill>";
   const localLink = "use [$claude-code-setup:spec-driven-planning](/Users/alice/Library/Mobile Documents/com~apple~CloudDocs/dotfiles/config/claude/skills/spec-driven-planning/SKILL.md)";
   const windowsEnvironmentContext =
