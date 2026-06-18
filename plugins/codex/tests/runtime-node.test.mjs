@@ -220,6 +220,7 @@ test("filters Codex handoff summaries, git directives, internal context, loaded 
   const userText = "# Files mentioned by the user:\n\n## codex-clipboard-ba43.png: /var/folders/T/codex-clipboard-ba43.png\n\n## My request for Codex:\nthreads list, hidden branch name, just show repo";
   const agentsBlock = "# AGENTS.md instructions\n\n<INSTRUCTIONS>\n# AI AGENT PROTOCOLS v2.0\n</INSTRUCTIONS>";
   const skillBlock = "<skill>\n<name>claude-code-setup:spec-driven-planning</name>\n<path>/Users/alice/skills/spec-driven-planning/SKILL.md</path>\n# Spec-Driven Planning\n</skill>";
+  const memoryCitationBlock = "<oai-mem-citation>\n<citation_entries>\nMEMORY.md:232-258|note=[checked prior memory]\n</citation_entries>\n<rollout_ids>\n</rollout_ids>\n</oai-mem-citation>";
   const localLink = "use [$claude-code-setup:spec-driven-planning](/Users/alice/Library/Mobile Documents/com~apple~CloudDocs/dotfiles/config/claude/skills/spec-driven-planning/SKILL.md)";
   const windowsEnvironmentContext =
     "<environment_context>\n" +
@@ -239,6 +240,7 @@ test("filters Codex handoff summaries, git directives, internal context, loaded 
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: windowsEnvironmentContext }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: agentsBlock }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: skillBlock }] } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: memoryCitationBlock }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: userText }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: localLink }] } },
     { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: longSummary }] } },
@@ -259,7 +261,7 @@ test("filters Codex handoff summaries, git directives, internal context, loaded 
   assert.equal(payload.thread.title, "threads list, hidden branch name, just show repo");
   assert.equal(Object.hasOwn(payload.thread, "metadata"), false);
   const raw = JSON.stringify(payload);
-  assert.doesNotMatch(raw, /<environment_context>|codex_internal_context|turn_aborted|command-name|command-message|command-args|local-command-stdout|AI AGENT PROTOCOLS|Spec-Driven Planning|Files mentioned by the user|codex-clipboard|do not upload this summary|compacted implementation detail|::git-/);
+  assert.doesNotMatch(raw, /<environment_context>|codex_internal_context|turn_aborted|command-name|command-message|command-args|local-command-stdout|oai-mem-citation|MEMORY\.md|AI AGENT PROTOCOLS|Spec-Driven Planning|Files mentioned by the user|codex-clipboard|do not upload this summary|compacted implementation detail|::git-/);
 });
 
 test("normalizes Codex repo metadata, data URL images, local image events, and attachment cache", async () => {

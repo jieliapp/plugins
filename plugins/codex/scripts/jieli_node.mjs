@@ -741,6 +741,7 @@ function shouldSkipUserMessage(content) {
     "<local-command-stderr>",
     "<local-command-caveat>",
     "<skill>",
+    "<oai-mem-citation>",
     "Base directory for this skill:",
     "# AGENTS.md instructions",
   ].some((prefix) => text.startsWith(prefix));
