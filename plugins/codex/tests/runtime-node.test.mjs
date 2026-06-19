@@ -15,7 +15,6 @@ import * as runtime from "../scripts/jieli_node.mjs";
 import {
   close,
   createMockJieliServer,
-  decodeHandoffContext,
   listen,
   makeTempDir,
   runNode,
@@ -67,14 +66,14 @@ test("helper command runtime contract is stable across OS shells", async () => {
 });
 
 test("shell hook contract normalizes macOS and Windows command inputs", () => {
-  const codexMac = runtime.normalizeShellHook({ session_id: "codex-mac", transcript_path: "/tmp/a.jsonl", cwd: "/repo", tool_name: "exec_command", tool_input: { cmd: "jieli-handoff-info" } });
+  const codexMac = runtime.normalizeShellHook({ session_id: "codex-mac", transcript_path: "/tmp/a.jsonl", cwd: "/repo", tool_name: "exec_command", tool_input: { cmd: "git status" } });
   assert.equal(codexMac.commandKey, "cmd");
-  assert.equal(codexMac.command, "jieli-handoff-info");
+  assert.equal(codexMac.command, "git status");
   assert.deepEqual(runtime.buildUpdatedHookInput(codexMac, "node helper"), { cmd: "node helper" });
 
-  const codexWindows = runtime.normalizeShellHook({ session_id: "codex-win", session_path: "C:\\Users\\Administrator\\.codex\\sessions\\rollout.jsonl", cwd: "C:\\repo", tool_name: "Shell", tool_input: { command: "& 'C:\\Users\\Administrator\\.codex\\plugins\\cache\\jieliapp\\jieli\\bin\\jieli-handoff-info.cmd'" } });
+  const codexWindows = runtime.normalizeShellHook({ session_id: "codex-win", session_path: "C:\\Users\\Administrator\\.codex\\sessions\\rollout.jsonl", cwd: "C:\\repo", tool_name: "Shell", tool_input: { command: "git status" } });
   assert.equal(codexWindows.commandKey, "command");
-  assert.match(codexWindows.command, /jieli-handoff-info\.cmd/);
+  assert.equal(codexWindows.command, "git status");
   assert.equal(codexWindows.transcriptPath, "C:\\Users\\Administrator\\.codex\\sessions\\rollout.jsonl");
 });
 
@@ -216,11 +215,12 @@ test("filters Codex handoff summaries, git directives, internal context, loaded 
     "Current progress:\n\n" +
     "- Repo: `/Users/alice/work/jieli`.\n" +
     "- This compacted implementation detail should not be uploaded.\n".repeat(20);
-  const finalText = '已提交：`abc1234 fix sync`\n\n::git-stage{cwd="/Users/alice/work/jieli"}\n::git-commit{cwd="/Users/alice/work/jieli"}\n';
   const userText = "# Files mentioned by the user:\n\n## codex-clipboard-ba43.png: /var/folders/T/codex-clipboard-ba43.png\n\n## My request for Codex:\nthreads list, hidden branch name, just show repo";
   const agentsBlock = "# AGENTS.md instructions\n\n<INSTRUCTIONS>\n# AI AGENT PROTOCOLS v2.0\n</INSTRUCTIONS>";
   const skillBlock = "<skill>\n<name>claude-code-setup:spec-driven-planning</name>\n<path>/Users/alice/skills/spec-driven-planning/SKILL.md</path>\n# Spec-Driven Planning\n</skill>";
   const memoryCitationBlock = "<oai-mem-citation>\n<citation_entries>\nMEMORY.md:232-258|note=[checked prior memory]\n</citation_entries>\n<rollout_ids>\n</rollout_ids>\n</oai-mem-citation>";
+  const finalText = '已提交：`abc1234 fix sync`\n\n::git-stage{cwd="/Users/alice/work/jieli"}\n::git-commit{cwd="/Users/alice/work/jieli"}\n';
+  const assistantTextWithMemoryCitation = `可行，保留正文。\n\n${memoryCitationBlock}`;
   const localLink = "use [$claude-code-setup:spec-driven-planning](/Users/alice/Library/Mobile Documents/com~apple~CloudDocs/dotfiles/config/claude/skills/spec-driven-planning/SKILL.md)";
   const windowsEnvironmentContext =
     "<environment_context>\n" +
@@ -242,6 +242,7 @@ test("filters Codex handoff summaries, git directives, internal context, loaded 
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: skillBlock }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: memoryCitationBlock }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: userText }] } },
+    { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: assistantTextWithMemoryCitation }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: localLink }] } },
     { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: longSummary }] } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: automaticCompactSummary }] } },
@@ -249,15 +250,16 @@ test("filters Codex handoff summaries, git directives, internal context, loaded 
   ]);
 
   const payload = await runtime.buildPayloadFromHook({ session_id: "codex-filter", transcript_path: transcript }, "https://jieli.example.test");
-  assert.deepEqual(payload.thread.messages.map((message) => message.role), ["user", "user", "assistant", "user", "assistant"]);
+  assert.deepEqual(payload.thread.messages.map((message) => message.role), ["user", "assistant", "user", "assistant", "user", "assistant"]);
   assert.equal(payload.thread.messages[0].content, "threads list, hidden branch name, just show repo");
+  assert.equal(payload.thread.messages[1].content, "可行，保留正文。");
   assert.equal(
-    payload.thread.messages[1].content,
+    payload.thread.messages[2].content,
     "use [$claude-code-setup:spec-driven-planning](file:///Users/alice/Library/Mobile%20Documents/com~apple~CloudDocs/dotfiles/config/claude/skills/spec-driven-planning/SKILL.md)",
   );
-  assert.equal(payload.thread.messages[2].content, runtime.COMPACTION_PLACEHOLDER);
   assert.equal(payload.thread.messages[3].content, runtime.COMPACTION_PLACEHOLDER);
-  assert.equal(payload.thread.messages[4].content, "已提交：`abc1234 fix sync`");
+  assert.equal(payload.thread.messages[4].content, runtime.COMPACTION_PLACEHOLDER);
+  assert.equal(payload.thread.messages[5].content, "已提交：`abc1234 fix sync`");
   assert.equal(payload.thread.title, "threads list, hidden branch name, just show repo");
   assert.equal(Object.hasOwn(payload.thread, "metadata"), false);
   const raw = JSON.stringify(payload);
@@ -699,32 +701,8 @@ test("handoff info and commit trailer helpers support Codex shell aliases and No
   assert.equal(info.cwd, tmp);
   assert.equal(info.branch, "feature/handoff");
 
-  for (const toolName of ["Bash", "Shell", "shell_command", "exec_command"]) {
-    const response = runtime.buildHookResponse({ session_id: "codex-handoff", transcript_path: "/tmp/codex-session.jsonl", cwd: "/repo", tool_name: toolName, tool_input: { command: "jieli-handoff-info" } });
-    const updated = response.hookSpecificOutput.updatedInput.command;
-    assert.doesNotMatch(updated, /JIELI_HANDOFF_CONTEXT_B64=/);
-    assert.match(updated, /node .*jieli_node\.mjs handoff-info --context-b64 /);
-    assert.deepEqual(decodeHandoffContext(updated), { session_id: "codex-handoff", transcript_path: "/tmp/codex-session.jsonl", cwd: "/repo" });
-  }
-  const codexExecResponse = runtime.buildHookResponse({ session_id: "codex-exec", transcript_path: "/tmp/codex-exec.jsonl", cwd: "/repo", tool_name: "exec_command", tool_input: { cmd: "jieli-handoff-info" } });
-  const codexExecCommand = codexExecResponse.hookSpecificOutput.updatedInput.cmd;
-  assert.match(codexExecCommand, /node .*jieli_node\.mjs handoff-info --context-b64 /);
-  assert.equal(codexExecResponse.hookSpecificOutput.updatedInput.command, undefined);
-  assert.deepEqual(decodeHandoffContext(codexExecCommand), { session_id: "codex-exec", transcript_path: "/tmp/codex-exec.jsonl", cwd: "/repo" });
-  for (const command of [
-    "jieli-handoff-info.cmd",
-    "jieli-handoff-info.exe",
-    "C:\\Users\\Administrator\\.codex\\plugins\\cache\\jieliapp\\jieli\\bin\\jieli-handoff-info.cmd",
-    "& 'C:\\Users\\Administrator\\.codex\\plugins\\cache\\jieliapp\\jieli\\bin\\jieli-handoff-info.cmd'",
-  ]) {
-    const response = runtime.buildHookResponse({ session_id: "codex-win", transcript_path: "C:\\Users\\Administrator\\.codex\\sessions\\rollout.jsonl", cwd: "C:\\repo", tool_name: "Shell", tool_input: { command } });
-    const updated = response.hookSpecificOutput.updatedInput.command;
-    assert.match(updated, /handoff-info --context-b64 /);
-    assert.deepEqual(decodeHandoffContext(updated), { session_id: "codex-win", transcript_path: "C:\\Users\\Administrator\\.codex\\sessions\\rollout.jsonl", cwd: "C:\\repo" });
-  }
   const cliInfo = await withEnv({ JIELI_HANDOFF_CONTEXT_B64: undefined, JIELI_BASE_URL: "https://jieli.example.test" }, () => runtime.buildHandoffInfo(process.env, encoded));
   assert.equal(cliInfo.thread_id, "T-stable-codex-id");
-  assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-handoff", tool_name: "Bash", tool_input: { command: "jieli-handoff-info | cat" } }), {});
 
   await withEnv({ HOME: tmp, JIELI_HANDOFF_CONTEXT_B64: undefined, JIELI_BASE_URL: "https://jieli.example.test" }, async () => {
     runtime.writeHandoffContext({ session_id: "hook-state", transcript_path: transcript, cwd: "/wrong" });
@@ -758,23 +736,12 @@ test("handoff info and commit trailer helpers support Codex shell aliases and No
   });
 });
 
-test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools", () => {
-  for (const [wrapperName, scriptName] of Object.entries({
-    "jieli-handoff-info.cmd": "handoff_info.mjs",
-    "jieli-read-thread.cmd": "read_thread.mjs",
-    "jieli-find-threads.cmd": "find_threads.mjs",
-  })) {
-    const content = readFileSync(join(pluginRoot, "bin", wrapperName), "utf8");
-    assert.match(content, /set "PLUGIN_ROOT=%BIN_DIR%\.\."/);
-    assert.match(content, new RegExp(`scripts\\\\${scriptName}`));
-    assert.match(content, /node /);
-    assert.doesNotMatch(content, /py -3/);
-  }
-  for (const wrapper of ["jieli-read-thread", "jieli-find-threads", "jieli-handoff-info"]) {
-    const result = spawnSync(join(pluginRoot, "bin", wrapper), ["--help"], { env: {}, encoding: "utf8", timeout: 5000 });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Jieli|usage:/);
-  }
+test("plugin helpers, docs, manifests, and hooks describe the split Jieli tools", () => {
+  const binFiles = readdirSync(join(pluginRoot, "bin"));
+  assert.deepEqual(
+    binFiles.filter((name) => name.startsWith("jieli-")),
+    [],
+  );
 
   const fallbackHelper = join(pluginRoot, "scripts", "jieli_helper.mjs");
   const fallbackHelperSource = readFileSync(fallbackHelper, "utf8");
@@ -783,7 +750,7 @@ test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools
   for (const [command, expected] of [
     ["read-thread", /Read a Jieli thread export/],
     ["find-threads", /Find Jieli threads/],
-    ["handoff-info", /usage: jieli-handoff-info/],
+    ["handoff-info", /usage: jieli_helper\.mjs handoff-info/],
   ]) {
     const result = spawnSync(process.execPath, [fallbackHelper, command, "--help"], { env: {}, encoding: "utf8", timeout: 5000 });
     assert.equal(result.status, 0, result.stderr);
@@ -810,6 +777,13 @@ test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools
   assert.match(docs, /commit_trailer/);
   assert.match(docs, /Jieli-Thread/);
   assert.doesNotMatch(docs, /https:\/\/your-jieli\.example\.com|self-hosted|Jieli thread reading skill|Provides the `jieli` skill/);
+
+  const readSkill = readFileSync(join(pluginRoot, "skills", "jieli-read", "SKILL.md"), "utf8");
+  assert.match(readSkill, /jieli_helper\.mjs read-thread/);
+  const findSkill = readFileSync(join(pluginRoot, "skills", "jieli-find", "SKILL.md"), "utf8");
+  assert.match(findSkill, /jieli_helper\.mjs find-threads/);
+  const handoffSkill = readFileSync(join(pluginRoot, "skills", "handoff", "SKILL.md"), "utf8");
+  assert.match(handoffSkill, /jieli_helper\.mjs handoff-info/);
 
   const manifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   assert.equal(manifest.name, "jieli");

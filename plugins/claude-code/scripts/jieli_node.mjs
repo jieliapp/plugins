@@ -28,7 +28,6 @@ const HANDOFF_CONTEXT_FILE = "claude-handoff-context.json";
 const SETTINGS_FILE_NAME = "settings.json";
 const TRAILER_KEY = "Jieli-Thread";
 const HANDOFF_CONTEXT_ENV = "JIELI_HANDOFF_CONTEXT_B64";
-const HANDOFF_HELPER_COMMAND = "jieli-handoff-info";
 const AMBIGUOUS_TOKENS = ["||", ";", "\n", "$(", "`", "<<", "|"];
 const SHELL_TOOL_NAMES = new Set(["Bash"]);
 const CONFIG_BASE_URL_ENV_NAMES = ["JIELI_BASE_URL", "CLAUDE_PLUGIN_OPTION_BASE_URL"];
@@ -1057,12 +1056,7 @@ function buildHookResponse(hookData) {
   captureBaselineFromHook(hookData, "pretooluse");
   const shell = normalizeShellHook(hookData);
   if (!shell) return {};
-  let updated = updatedHandoffCommand(shell.command, {
-    session_id: shell.sessionId,
-    transcript_path: shell.transcriptPath,
-    cwd: shell.cwd,
-  });
-  if (!updated) updated = updatedCommitCommand(shell.command, shell.sessionId);
+  const updated = updatedCommitCommand(shell.command, shell.sessionId);
   if (!updated) return {};
   return {
     hookSpecificOutput: {
@@ -1106,36 +1100,6 @@ function normalizeShellHook(hookData, allowedTools = SHELL_TOOL_NAMES) {
 
 function buildUpdatedHookInput(shell, updatedCommand) {
   return { [shell.commandKey || "command"]: updatedCommand };
-}
-
-function updatedHandoffCommand(command, hookData) {
-  const helper = resolvedHandoffHelperCommand(command);
-  if (!helper) return "";
-  const context = {
-    session_id: String(hookData.session_id || ""),
-    transcript_path: String(hookData.transcript_path || hookData.session_path || ""),
-    cwd: String(hookData.cwd || ""),
-  };
-  const encoded = Buffer.from(JSON.stringify(context), "utf8").toString("base64");
-  return `${helper} --context-b64 ${quoteShell(encoded)}`;
-}
-
-function resolvedHandoffHelperCommand(command) {
-  if (command.includes(HANDOFF_CONTEXT_ENV) || AMBIGUOUS_TOKENS.some((token) => command.includes(token))) return "";
-  const parts = shellSplit(command);
-  if (!parts) return "";
-  if ((parts.length === 1 && isHandoffHelper(parts[0])) || (parts.length === 2 && parts[0] === "&" && isHandoffHelper(parts[1]))) {
-    return `node ${quoteShell(join(pluginRoot, "scripts", "jieli_node.mjs"))} handoff-info`;
-  }
-  return "";
-}
-
-function isHandoffHelper(part) {
-  const normalized = String(part || "").replace(/\\/g, "/").toLowerCase();
-  const name = normalized.split("/").pop();
-  return [HANDOFF_HELPER_COMMAND, `${HANDOFF_HELPER_COMMAND}.cmd`, `${HANDOFF_HELPER_COMMAND}.exe`].some(
-    (helper) => name === helper || normalized.endsWith(`/bin/${helper}`) || normalized.endsWith(`bin${helper}`),
-  );
 }
 
 function updatedCommitCommand(command, sessionId) {
@@ -1426,7 +1390,7 @@ function formatThreadsMarkdown(payload, baseUrl) {
 
 function handoffInfoMain(args = []) {
   if (args.includes("--help") || args.includes("-h")) {
-    console.log("usage: jieli-handoff-info [--context-b64 CONTEXT]");
+    console.log("usage: jieli_helper.mjs handoff-info [--context-b64 CONTEXT]");
     return 0;
   }
   const command = createCommandRuntime("handoff-info", args);

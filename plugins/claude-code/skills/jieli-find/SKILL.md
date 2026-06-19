@@ -7,7 +7,13 @@ description: "Search prior Jieli threads by keywords, repo, file, topic, or othe
 
 ## Environment
 
-Use the `jieli-find-threads` command for thread search. It is installed from the plugin `bin/` directory and resolves the plugin scripts path itself. If the command is not on `PATH`, resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run `node <resolved-skill-dir>/../../scripts/jieli_helper.mjs find-threads ...`. Do not duplicate raw `curl` calls unless you are diagnosing the helper, and do not enumerate installed helpers or choose wrapper files in this skill.
+Resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run it directly for thread search:
+
+```bash
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs find-threads ...
+```
+
+Do not depend on plugin `bin/` commands being on `PATH`; agent app shells may not include the plugin `bin/` directory. Do not duplicate raw `curl` calls unless you are diagnosing the helper, and do not enumerate installed helpers or choose wrapper files in this skill.
 
 If the API key is missing, ask the user to configure the plugin, export `JIELI_API_KEY`, or write `~/.config/jieli/settings.json`. Jieli uses `https://jieli.app` by default.
 
@@ -17,20 +23,20 @@ If the API key is missing, ask the user to configure the plugin, export `JIELI_A
 2. Search all providers by default:
 
 ```bash
-jieli-find-threads "<query>" --page-size 10 --sort updated
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs find-threads "<query>" --page-size 10 --sort updated
 ```
 
 3. Do not infer `--provider` from the current agent. Pass it only when the user explicitly asks for one:
 
 ```bash
-jieli-find-threads "<query>" --provider codex --page-size 10 --sort updated
-jieli-find-threads "<query>" --provider claude_code --page-size 10 --sort updated
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs find-threads "<query>" --provider codex --page-size 10 --sort updated
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs find-threads "<query>" --provider claude_code --page-size 10 --sort updated
 ```
 
 4. Add optional filters only when explicit or strongly implied:
 
 ```bash
-jieli-find-threads "<query>" --repo "<repo>" --label "<label>" --page-size 10 --page 2 --sort updated
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs find-threads "<query>" --repo "<repo>" --label "<label>" --page-size 10 --page 2 --sort updated
 ```
 
 5. Return a compact ranked list using the helper's `thread_id`/`provider_thread_id` and `read_url`.

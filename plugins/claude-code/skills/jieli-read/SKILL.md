@@ -7,7 +7,13 @@ description: "Read a specific known Jieli /threads/T-<uuid> link or raw T-<uuid>
 
 ## Environment
 
-Use the `jieli-read-thread` command for thread reads. It is installed from the plugin `bin/` directory and resolves the plugin scripts path itself. If the command is not on `PATH`, resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run `node <resolved-skill-dir>/../../scripts/jieli_helper.mjs read-thread ...`. Do not call plugin scripts by cache path, enumerate installed helpers, or choose wrapper files in this skill.
+Resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and run it directly for thread reads:
+
+```bash
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs read-thread ...
+```
+
+Do not depend on plugin `bin/` commands being on `PATH`; agent app shells may not include the plugin `bin/` directory. Do not call plugin scripts by cache path, enumerate installed helpers, or choose wrapper files in this skill.
 
 If the API key is missing, ask the user to configure the plugin, export `JIELI_API_KEY`, or write `~/.config/jieli/settings.json`. Jieli uses `https://jieli.app` by default.
 
@@ -17,13 +23,13 @@ If the API key is missing, ask the user to configure the plugin, export `JIELI_A
 2. Start with a bounded markdown read:
 
 ```bash
-jieli-read-thread "<thread_id>" --truncate-tool-results --max-chars 12000
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs read-thread "<thread_id>" --truncate-tool-results --max-chars 12000
 ```
 
 3. For missing details, use focused 1-based inclusive line ranges:
 
 ```bash
-jieli-read-thread "<thread_id>" --truncate-tool-results --start-line 120 --end-line 220 --max-chars 12000
+node <resolved-skill-dir>/../../scripts/jieli_helper.mjs read-thread "<thread_id>" --truncate-tool-results --start-line 120 --end-line 220 --max-chars 12000
 ```
 
 4. Answer the user's question first. Do not paste the full transcript unless explicitly requested.

@@ -15,7 +15,6 @@ import * as runtime from "../scripts/jieli_node.mjs";
 import {
   close,
   createMockJieliServer,
-  decodeHandoffContext,
   listen,
   makeTempDir,
   runNode,
@@ -67,14 +66,14 @@ test("helper command runtime contract is stable across OS shells", async () => {
 });
 
 test("shell hook contract normalizes macOS and Windows command inputs", () => {
-  const claudeMac = runtime.normalizeShellHook({ session_id: "cc-mac", transcript_path: "/tmp/a.jsonl", cwd: "/repo", tool_name: "Bash", tool_input: { command: "jieli-handoff-info" } });
+  const claudeMac = runtime.normalizeShellHook({ session_id: "cc-mac", transcript_path: "/tmp/a.jsonl", cwd: "/repo", tool_name: "Bash", tool_input: { command: "git status" } });
   assert.equal(claudeMac.commandKey, "command");
-  assert.equal(claudeMac.command, "jieli-handoff-info");
+  assert.equal(claudeMac.command, "git status");
   assert.deepEqual(runtime.buildUpdatedHookInput(claudeMac, "node helper"), { command: "node helper" });
 
-  const claudeWindows = runtime.normalizeShellHook({ session_id: "cc-win", session_path: "C:\\Users\\Administrator\\.claude\\projects\\session.jsonl", cwd: "C:\\repo", tool_name: "Bash", tool_input: { command: "& 'C:\\Users\\Administrator\\.claude\\plugins\\cache\\jieliapp\\claude-code\\bin\\jieli-handoff-info.cmd'" } });
+  const claudeWindows = runtime.normalizeShellHook({ session_id: "cc-win", session_path: "C:\\Users\\Administrator\\.claude\\projects\\session.jsonl", cwd: "C:\\repo", tool_name: "Bash", tool_input: { command: "git status" } });
   assert.equal(claudeWindows.commandKey, "command");
-  assert.match(claudeWindows.command, /jieli-handoff-info\.cmd/);
+  assert.equal(claudeWindows.command, "git status");
   assert.equal(claudeWindows.transcriptPath, "C:\\Users\\Administrator\\.claude\\projects\\session.jsonl");
 });
 
@@ -731,25 +730,8 @@ test("handoff info and commit trailer helpers inject Node-based context and trai
   assert.equal(info.thread_id, "T-cc-1");
   assert.equal(info.url, "https://jieli.example.test/threads/T-cc-1");
 
-  const handoff = runtime.buildHookResponse({ session_id: "cc-handoff", transcript_path: "/tmp/claude-session.jsonl", cwd: "/repo", tool_name: "Bash", tool_input: { command: "jieli-handoff-info" } });
-  const handoffCommand = handoff.hookSpecificOutput.updatedInput.command;
-  assert.doesNotMatch(handoffCommand, /JIELI_HANDOFF_CONTEXT_B64=/);
-  assert.match(handoffCommand, /node .*jieli_node\.mjs handoff-info --context-b64 /);
-  assert.deepEqual(decodeHandoffContext(handoffCommand), { session_id: "cc-handoff", transcript_path: "/tmp/claude-session.jsonl", cwd: "/repo" });
-  for (const command of [
-    "jieli-handoff-info.cmd",
-    "jieli-handoff-info.exe",
-    "C:\\Users\\Administrator\\.claude\\plugins\\cache\\jieliapp\\claude-code\\bin\\jieli-handoff-info.cmd",
-    "& 'C:\\Users\\Administrator\\.claude\\plugins\\cache\\jieliapp\\claude-code\\bin\\jieli-handoff-info.cmd'",
-  ]) {
-    const response = runtime.buildHookResponse({ session_id: "cc-win", transcript_path: "C:\\Users\\Administrator\\.claude\\projects\\session.jsonl", cwd: "C:\\repo", tool_name: "Bash", tool_input: { command } });
-    const updated = response.hookSpecificOutput.updatedInput.command;
-    assert.match(updated, /handoff-info --context-b64 /);
-    assert.deepEqual(decodeHandoffContext(updated), { session_id: "cc-win", transcript_path: "C:\\Users\\Administrator\\.claude\\projects\\session.jsonl", cwd: "C:\\repo" });
-  }
   const cliInfo = await withEnv({ JIELI_HANDOFF_CONTEXT_B64: undefined, JIELI_BASE_URL: "https://jieli.example.test" }, () => runtime.buildHandoffInfo(process.env, encoded));
   assert.equal(cliInfo.thread_id, "T-cc-1");
-  assert.deepEqual(runtime.buildHookResponse({ session_id: "cc-handoff", tool_name: "Bash", tool_input: { command: "jieli-handoff-info | cat" } }), {});
 
   await withEnv({ HOME: tmp, JIELI_HANDOFF_CONTEXT_B64: undefined, JIELI_BASE_URL: "https://jieli.example.test" }, async () => {
     runtime.writeHandoffContext({ session_id: "cc-state", transcript_path: join(tmp, "state.jsonl"), cwd: tmp });
@@ -782,24 +764,12 @@ test("handoff info and commit trailer helpers inject Node-based context and trai
   });
 });
 
-test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools", () => {
-  for (const [wrapperName, scriptName] of Object.entries({
-    "jieli-handoff-info.cmd": "handoff_info.mjs",
-    "jieli-read-thread.cmd": "read_thread.mjs",
-    "jieli-find-threads.cmd": "find_threads.mjs",
-  })) {
-    const content = readFileSync(join(pluginRoot, "bin", wrapperName), "utf8");
-    assert.match(content, /set "PLUGIN_ROOT=%BIN_DIR%\.\."/);
-    assert.match(content, new RegExp(`scripts\\\\${scriptName}`));
-    assert.match(content, /node /);
-    assert.doesNotMatch(content, /py -3/);
-  }
-
-  for (const wrapper of ["jieli-read-thread", "jieli-find-threads", "jieli-handoff-info"]) {
-    const result = spawnSync(join(pluginRoot, "bin", wrapper), ["--help"], { env: {}, encoding: "utf8", timeout: 5000 });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Jieli|usage:/);
-  }
+test("plugin helpers, docs, manifests, and hooks describe the split Jieli tools", () => {
+  const binFiles = readdirSync(join(pluginRoot, "bin"));
+  assert.deepEqual(
+    binFiles.filter((name) => name.startsWith("jieli-")),
+    [],
+  );
 
   const fallbackHelper = join(pluginRoot, "scripts", "jieli_helper.mjs");
   const fallbackHelperSource = readFileSync(fallbackHelper, "utf8");
@@ -808,7 +778,7 @@ test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools
   for (const [command, expected] of [
     ["read-thread", /Read a Jieli thread export/],
     ["find-threads", /Find Jieli threads/],
-    ["handoff-info", /usage: jieli-handoff-info/],
+    ["handoff-info", /usage: jieli_helper\.mjs handoff-info/],
   ]) {
     const result = spawnSync(process.execPath, [fallbackHelper, command, "--help"], { env: {}, encoding: "utf8", timeout: 5000 });
     assert.equal(result.status, 0, result.stderr);
@@ -833,6 +803,13 @@ test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools
   assert.match(docs, /commit_trailer/);
   assert.match(docs, /Jieli-Thread/);
   assert.doesNotMatch(docs, /https:\/\/your-jieli\.example\.com|self-hosted|Provides the `jieli` skill/);
+
+  const readSkill = readFileSync(join(pluginRoot, "skills", "jieli-read", "SKILL.md"), "utf8");
+  assert.match(readSkill, /jieli_helper\.mjs read-thread/);
+  const findSkill = readFileSync(join(pluginRoot, "skills", "jieli-find", "SKILL.md"), "utf8");
+  assert.match(findSkill, /jieli_helper\.mjs find-threads/);
+  const handoffSkill = readFileSync(join(pluginRoot, "skills", "handoff", "SKILL.md"), "utf8");
+  assert.match(handoffSkill, /jieli_helper\.mjs handoff-info/);
 
   const manifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
   assert.equal(manifest.name, "jieli");

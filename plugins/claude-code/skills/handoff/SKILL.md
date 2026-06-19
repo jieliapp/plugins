@@ -17,12 +17,6 @@ Resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and ru
 node <resolved-skill-dir>/../../scripts/jieli_helper.mjs handoff-info
 ```
 
-If that fails or prints invalid JSON, try:
-
-```bash
-jieli-handoff-info
-```
-
 Do not enumerate plugin cache directories, choose wrapper files, or sort installed helpers in this skill.
 
 Include Jieli thread lines only when both `thread_id` and `url` are present. If metadata is missing or invalid, continue without a thread id and do not guess from recent transcripts.
