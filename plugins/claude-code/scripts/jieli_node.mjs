@@ -71,7 +71,7 @@ export async function main(forcedCommand = "") {
   const args = forcedCommand ? argv : argv;
   try {
     if (command === "sync") return await syncMain(args);
-    if (command === "commit-trailer") return commitTrailerMain(args);
+    if (command === "commit-trailer") return await commitTrailerMain(args);
     if (command === "read-thread") return await readThreadMain(args);
     if (command === "find-threads") return await findThreadsMain(args);
     if (command === "handoff-info") return handoffInfoMain(args);
@@ -1007,18 +1007,46 @@ function logHookError(message) {
   writeFileSync(path, `[${stamp}] ${message}\n`, { flag: "a", encoding: "utf8" });
 }
 
-function commitTrailerMain(args) {
+async function commitTrailerMain(args) {
   parseArgs(args, { boolean: new Set(["jieli-hook"]) });
   let response = {};
   try {
     const hookData = JSON.parse(readStdin() || "{}");
     writeHandoffContext(hookData);
+    await syncMissingSessionFromHook(hookData, "pretooluse");
     response = buildHookResponse(hookData);
   } catch {
     response = {};
   }
   if (Object.keys(response).length) console.log(JSON.stringify(response));
   return 0;
+}
+
+async function syncMissingSessionFromHook(hookData, trigger) {
+  const sessionId = String(hookData?.session_id || "").trim();
+  const transcriptPath = String(hookData?.transcript_path || hookData?.session_path || "").trim();
+  if (!sessionId || !transcriptPath || !existsSync(transcriptPath)) return;
+  const mapping = readJson(join(homeDir(), ".jieli", "claude-sessions.json"), {});
+  if (mapping[sessionId]) return;
+  const missing = missingConfigVars();
+  if (missing.length) return;
+  const lock = acquireSyncLock(sessionId);
+  if (!lock.acquired) return;
+  try {
+    const baseUrl = (optionalEnv("JIELI_BASE_URL", "CLAUDE_PLUGIN_OPTION_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
+    const apiKey = requiredEnv("JIELI_API_KEY", "CLAUDE_PLUGIN_OPTION_API_KEY");
+    const payload = await buildPayloadFromHook(
+      { ...hookData, transcript_path: transcriptPath, session_id: sessionId, trigger },
+      baseUrl,
+      (path) => uploadAttachmentCached(path, baseUrl, apiKey),
+    );
+    await uploadPayload(payload, baseUrl, apiKey);
+    writeSessionMapping(claudeSessionId(payload.thread.id), baseUrl, payload.thread.id);
+  } catch (error) {
+    logHookError(`sync ${trigger}: ${formatError(error)}`);
+  } finally {
+    releaseSyncLock(lock);
+  }
 }
 
 function buildHookResponse(hookData) {

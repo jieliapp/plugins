@@ -645,6 +645,41 @@ test("sync CLI reports missing config and skips missing transcripts without fail
   assert.throws(() => statSync(join(transcriptHome, ".jieli", "hooks.log")));
 });
 
+test("pretool hook uploads a Claude session that sessionstart saw before transcript flush", async () => {
+  const home = makeTempDir();
+  const transcript = join(home, "projects", "late-session.jsonl");
+  const { server, state } = createMockJieliServer();
+  const baseUrl = await listen(server);
+  try {
+    const sessionStart = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "sessionstart", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "cc-late", cwd: "/Users/alice/work/jieli" }),
+      env: { HOME: home, PATH: process.env.PATH, JIELI_API_KEY: "secret", JIELI_BASE_URL: baseUrl },
+    });
+    assert.equal(sessionStart.status, 0);
+    assert.equal(state.uploads.length, 0);
+
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeJsonl(transcript, [
+      { type: "user", uuid: "u-late", sessionId: "cc-late", cwd: "/Users/alice/work/jieli", gitBranch: "main", message: { role: "user", content: "sync after flush" } },
+      { type: "assistant", uuid: "a-late", sessionId: "cc-late", cwd: "/Users/alice/work/jieli", message: { role: "assistant", content: [{ type: "text", text: "synced" }] } },
+    ]);
+
+    const pretool = await runNode([join(pluginRoot, "scripts", "commit_trailer.mjs"), "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "cc-late", cwd: "/Users/alice/work/jieli", tool_name: "Bash", tool_input: { command: "echo hi" } }),
+      env: { HOME: home, PATH: process.env.PATH, JIELI_API_KEY: "secret", JIELI_BASE_URL: baseUrl },
+    });
+    assert.equal(pretool.status, 0);
+    assert.equal(state.uploads.length, 1);
+    assert.equal(state.uploads[0].body.thread.id, "T-cc-late");
+    assert.deepEqual(JSON.parse(readFileSync(join(home, ".jieli", "claude-sessions.json"), "utf8"))["cc-late"], {
+      provider_thread_id: "T-cc-late",
+      base_url: baseUrl,
+    });
+  } finally {
+    await close(server);
+  }
+});
+
 test("read-thread and find-threads helpers validate ids, shape requests, truncate output, and format markdown", async () => {
   assert.throws(() => runtime.validateThreadId("/threads/T-abc123"), /provider thread id/);
   assert.throws(() => runtime.validateThreadId("https://jieli.example.test/threads/T-abc123"), /provider thread id/);
