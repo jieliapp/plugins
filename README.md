@@ -36,11 +36,21 @@ const path = require("node:path");
 const settingsPath = path.join(os.homedir(), ".config", "jieli", "settings.json");
 fs.writeFileSync(
   settingsPath,
-  JSON.stringify({ api_key: "your-jieli-api-key", base_url: "https://jieli.app" }, null, 2) + "\n",
+  JSON.stringify(
+    {
+      api_key: "your-jieli-api-key",
+      base_url: "https://jieli.app",
+      commit_trailer: true
+    },
+    null,
+    2,
+  ) + "\n",
   { mode: 0o600 },
 );
 JS
 ```
+
+`commit_trailer` is optional and defaults to `true`. Set it to `false` to disable the automatic `Jieli-Thread` trailer added by the `PreToolUse` hook.
 
 You can also use an environment variable before starting the agent:
 
@@ -53,8 +63,7 @@ export JIELI_API_KEY="your-jieli-api-key"
 - Syncs Claude Code sessions to Jieli threads.
 - Syncs local Codex sessions to Jieli threads.
 - Uploads pasted local images as Jieli attachments.
-- Adds `Claude-Code-Thread-ID` trailers to Claude-created git commits.
-- Adds best-effort `Jieli-Thread` trailers to simple Codex-created `git commit` commands.
+- Adds best-effort `Jieli-Thread` trailers to simple Claude Code and Codex `git commit` commands.
 - Provides the `jieli-read` skill for reading known Jieli thread links or ids.
 - Provides the `jieli-find` skill for searching synced Jieli threads by keywords, repo, file, topic, or clues.
 - Redacts common secrets before upload.

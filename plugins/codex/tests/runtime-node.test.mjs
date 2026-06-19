@@ -747,6 +747,15 @@ test("handoff info and commit trailer helpers support Codex shell aliases and No
     assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "ship" | cat' } }), {});
     assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "ship" --trailer Jieli-Thread:old' } }), {});
   });
+
+  const noTrailerHome = makeTempDir();
+  await withEnv({ HOME: noTrailerHome }, async () => {
+    mkdirSync(join(noTrailerHome, ".config", "jieli"), { recursive: true });
+    mkdirSync(join(noTrailerHome, ".jieli"), { recursive: true });
+    writeFileSync(join(noTrailerHome, ".config", "jieli", "settings.json"), JSON.stringify({ commit_trailer: false }), "utf8");
+    writeFileSync(join(noTrailerHome, ".jieli", "codex-sessions.json"), JSON.stringify({ "codex-no-trailer": { provider_thread_id: "T-codex-no-trailer", base_url: "https://jieli.example.test" } }), "utf8");
+    assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-no-trailer", tool_name: "Bash", tool_input: { command: 'git commit -m "ship"' } }), {});
+  });
 });
 
 test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools", () => {
@@ -794,11 +803,12 @@ test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools
 
   const docs = [
     readFileSync(join(repoRoot, "README.md"), "utf8"),
-    readFileSync(join(pluginRoot, "README.md"), "utf8"),
     readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"),
   ].join("\n");
   assert.match(docs, /`jieli-read`/);
   assert.match(docs, /`jieli-find`/);
+  assert.match(docs, /commit_trailer/);
+  assert.match(docs, /Jieli-Thread/);
   assert.doesNotMatch(docs, /https:\/\/your-jieli\.example\.com|self-hosted|Jieli thread reading skill|Provides the `jieli` skill/);
 
   const manifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));

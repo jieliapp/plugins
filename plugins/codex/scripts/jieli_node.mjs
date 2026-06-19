@@ -205,6 +205,10 @@ function settingsValue(...keys) {
   return "";
 }
 
+function commitTrailerEnabled() {
+  return readJsonResult(settingsPath(), {}).value.commit_trailer !== false;
+}
+
 function settingsParseError() {
   const path = settingsPath();
   if (!existsSync(path)) return "";
@@ -1376,6 +1380,7 @@ function isHandoffHelper(part) {
 }
 
 function updatedCommitCommand(command, sessionId) {
+  if (!commitTrailerEnabled()) return "";
   if (!command || !sessionId || AMBIGUOUS_TOKENS.some((token) => command.includes(token))) return "";
   const mapping = readJson(join(homeDir(), ".jieli", SESSION_MAPPING_FILE), {});
   const session = mapping[sessionId];

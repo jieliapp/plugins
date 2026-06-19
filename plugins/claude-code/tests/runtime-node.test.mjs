@@ -771,6 +771,15 @@ test("handoff info and commit trailer helpers inject Node-based context and trai
     );
     assert.deepEqual(runtime.buildHookResponse({ session_id: "cc-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "x" | git status' } }), {});
   });
+
+  const noTrailerHome = makeTempDir();
+  await withEnv({ HOME: noTrailerHome }, async () => {
+    mkdirSync(join(noTrailerHome, ".config", "jieli"), { recursive: true });
+    mkdirSync(join(noTrailerHome, ".jieli"), { recursive: true });
+    writeFileSync(join(noTrailerHome, ".config", "jieli", "settings.json"), JSON.stringify({ commit_trailer: false }), "utf8");
+    writeFileSync(join(noTrailerHome, ".jieli", "claude-sessions.json"), JSON.stringify({ "cc-no-trailer": { provider_thread_id: "T-cc-no-trailer", base_url: "https://jieli.example.test" } }), "utf8");
+    assert.deepEqual(runtime.buildHookResponse({ session_id: "cc-no-trailer", tool_name: "Bash", tool_input: { command: 'git commit -m "ship"' } }), {});
+  });
 });
 
 test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools", () => {
@@ -821,6 +830,8 @@ test("plugin wrappers, docs, manifests, and hooks describe the split Jieli tools
   ].join("\n");
   assert.match(docs, /`jieli-read`/);
   assert.match(docs, /`jieli-find`/);
+  assert.match(docs, /commit_trailer/);
+  assert.match(docs, /Jieli-Thread/);
   assert.doesNotMatch(docs, /https:\/\/your-jieli\.example\.com|self-hosted|Provides the `jieli` skill/);
 
   const manifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
