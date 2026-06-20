@@ -1,5 +1,5 @@
 ---
-name: jieli-find
+name: jieli-find-thread
 description: "Search prior Jieli threads by keywords, repo, file, topic, or other clues, then optionally read a matching thread."
 ---
 
@@ -13,9 +13,9 @@ Resolve `../../scripts/jieli_helper.mjs` relative to this `SKILL.md` file and ru
 node <resolved-skill-dir>/../../scripts/jieli_helper.mjs find-threads ...
 ```
 
-Do not depend on plugin `bin/` commands being on `PATH`; agent app shells may not include the plugin `bin/` directory. Do not duplicate raw `curl` calls unless you are diagnosing the helper, and do not enumerate installed helpers or choose wrapper files in this skill.
+Do not depend on plugin `bin/` commands being on `PATH`; Codex app shells may not include the plugin `bin/` directory. Do not duplicate raw `curl` calls unless you are diagnosing the helper, and do not enumerate installed helpers or choose wrapper files in this skill.
 
-If the API key is missing, ask the user to configure the plugin, export `JIELI_API_KEY`, or write `~/.config/jieli/settings.json`. Jieli uses `https://jieli.app` by default.
+If the API key is missing, ask the user to configure `JIELI_API_KEY` or `~/.config/jieli/settings.json`. Jieli uses `https://jieli.app` by default.
 
 ## Search Procedure
 

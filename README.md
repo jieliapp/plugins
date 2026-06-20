@@ -64,8 +64,8 @@ export JIELI_API_KEY="your-jieli-api-key"
 - Syncs local Codex sessions to Jieli threads.
 - Uploads pasted local images as Jieli attachments.
 - Adds best-effort `Jieli-Thread` trailers to simple Claude Code and Codex `git commit` commands.
-- Provides the `jieli-read` skill for reading known Jieli thread links or ids.
-- Provides the `jieli-find` skill for searching synced Jieli threads by keywords, repo, file, topic, or clues.
+- Provides the `jieli-read-thread` skill for reading known Jieli thread links or ids.
+- Provides the `jieli-find-thread` skill for searching synced Jieli threads by keywords, repo, file, topic, or clues.
 - Redacts common secrets before upload.
 
 ## Redaction

@@ -1,5 +1,5 @@
 ---
-name: jieli-read
+name: jieli-read-thread
 description: "Read a specific known Jieli /threads/T-<uuid> link or raw T-<uuid> thread id via the markdown/json export."
 ---
 

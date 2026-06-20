@@ -49,8 +49,8 @@ Format: plain-text bullets, no markdown headers, no code fences. Include suggest
 If the current thread was identified, assemble:
 
 ```text
-Continuing work from Jieli thread <THREAD_ID>.
-When you lack specific information, use the jieli-read skill to read the thread.
+Continuing work from thread <THREAD_ID>.
+When you lack specific information, use the read thread skill to read the thread.
 
 Relevant files: <path1>, <path2>, <path3>
 Suggested skills: <skill1>, <skill2>

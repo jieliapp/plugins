@@ -804,15 +804,15 @@ test("plugin helpers, docs, manifests, and hooks describe the split Jieli tools"
     readFileSync(join(repoRoot, "README.md"), "utf8"),
     readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"),
   ].join("\n");
-  assert.match(docs, /`jieli-read`/);
-  assert.match(docs, /`jieli-find`/);
+  assert.match(docs, /`jieli-read-thread`/);
+  assert.match(docs, /`jieli-find-thread`/);
   assert.match(docs, /commit_trailer/);
   assert.match(docs, /Jieli-Thread/);
   assert.doesNotMatch(docs, /https:\/\/your-jieli\.example\.com|self-hosted|Provides the `jieli` skill/);
 
-  const readSkill = readFileSync(join(pluginRoot, "skills", "jieli-read", "SKILL.md"), "utf8");
+  const readSkill = readFileSync(join(pluginRoot, "skills", "jieli-read-thread", "SKILL.md"), "utf8");
   assert.match(readSkill, /jieli_helper\.mjs read-thread/);
-  const findSkill = readFileSync(join(pluginRoot, "skills", "jieli-find", "SKILL.md"), "utf8");
+  const findSkill = readFileSync(join(pluginRoot, "skills", "jieli-find-thread", "SKILL.md"), "utf8");
   assert.match(findSkill, /jieli_helper\.mjs find-threads/);
   const handoffSkill = readFileSync(join(pluginRoot, "skills", "handoff", "SKILL.md"), "utf8");
   assert.match(handoffSkill, /jieli_helper\.mjs handoff-info/);
