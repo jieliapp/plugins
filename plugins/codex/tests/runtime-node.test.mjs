@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -25,10 +26,15 @@ import {
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = dirname(dirname(pluginRoot));
 
+function pluginBinFiles() {
+  const binDir = join(pluginRoot, "bin");
+  return existsSync(binDir) ? readdirSync(binDir) : [];
+}
+
 test("runtime entrypoints do not invoke Python", () => {
   const files = [
     "hooks/hooks.json",
-    ...readdirSync(join(pluginRoot, "bin")).map((name) => `bin/${name}`),
+    ...pluginBinFiles().map((name) => `bin/${name}`),
   ];
 
   for (const file of files) {
@@ -737,7 +743,7 @@ test("handoff info and commit trailer helpers support Codex shell aliases and No
 });
 
 test("plugin helpers, docs, manifests, and hooks describe the split Jieli tools", () => {
-  const binFiles = readdirSync(join(pluginRoot, "bin"));
+  const binFiles = pluginBinFiles();
   assert.deepEqual(
     binFiles.filter((name) => name.startsWith("jieli-")),
     [],
