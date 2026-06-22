@@ -665,6 +665,44 @@ test("configuration, upload, lock, session mapping, and missing transcript behav
   assert.throws(() => statSync(join(transcriptHome, ".jieli", "hooks.log")));
 });
 
+test("sync CLI reports message quota exceeded only once per session on stop", async () => {
+  const home = makeTempDir();
+  const transcript = join(home, "sessions", "quota-session.jsonl");
+  mkdirSync(dirname(transcript), { recursive: true });
+  writeJsonl(transcript, [
+    { type: "session_meta", payload: { id: "codex-quota", cwd: "/Users/alice/work/jieli", git: { branch: "main" } } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "sync me" }] } },
+    { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] } },
+  ]);
+  const { server } = createMockJieliServer({ uploadStatus: 409, uploadResponse: { success: false, message: "message quota exceeded", data: null } });
+  const baseUrl = await listen(server);
+  const env = { HOME: home, PATH: process.env.PATH, JIELI_API_KEY: "secret", JIELI_BASE_URL: baseUrl };
+  try {
+    const sessionStart = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "sessionstart", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "codex-quota", cwd: "/Users/alice/work/jieli" }),
+      env,
+    });
+    assert.equal(sessionStart.status, 0);
+    assert.equal(sessionStart.stdout, "");
+
+    const firstStop = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "stop", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "codex-quota", cwd: "/Users/alice/work/jieli" }),
+      env,
+    });
+    assert.equal(firstStop.status, 0);
+    assert.match(JSON.parse(firstStop.stdout).systemMessage, /message quota exceeded/);
+
+    const secondStop = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "stop", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "codex-quota", cwd: "/Users/alice/work/jieli" }),
+      env,
+    });
+    assert.equal(secondStop.status, 0);
+    assert.equal(secondStop.stdout, "");
+  } finally {
+    await close(server);
+  }
+});
+
 test("read-thread and find-threads helpers validate ids, shape requests, truncate output, and format markdown", async () => {
   assert.throws(() => runtime.validateThreadId("https://jieli.example.test/threads/T-1"), /provider thread id/);
   assert.throws(() => runtime.validateThreadId("T-1.md"), /without .md/);
