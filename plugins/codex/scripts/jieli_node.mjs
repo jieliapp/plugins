@@ -27,6 +27,7 @@ const TRANSCRIPT_FLUSH_TIMEOUT_MS = 1500;
 const ATTACHMENT_CACHE_FILE = "codex-attachments.json";
 const SESSION_MAPPING_FILE = "codex-sessions.json";
 const HANDOFF_CONTEXT_FILE = "codex-handoff-context.json";
+const QUOTA_NOTICE_FILE = "quota-notices.json";
 const TOOL_OUTPUT_MAX_CHARS = 20000;
 const SETTINGS_FILE_NAME = "settings.json";
 const TRAILER_KEY = "Jieli-Thread";
@@ -253,10 +254,18 @@ function buildMissingConfigHookResponse(trigger, missing) {
   };
 }
 
-function buildQuotaExceededHookResponse(trigger, error) {
-  if (String(trigger || "").toLowerCase() !== "sessionstart") return {};
+function buildQuotaExceededHookResponse(trigger, error, sessionId = "") {
+  if (String(trigger || "").toLowerCase() !== "stop") return {};
   const message = formatError(error);
   if (!/\b409\b/.test(message) || !/quota/i.test(message)) return {};
+  const cleanSessionId = String(sessionId || "").trim();
+  if (!cleanSessionId) return {};
+  const path = join(homeDir(), ".jieli", QUOTA_NOTICE_FILE);
+  const notices = readJson(path, {});
+  const key = `${PROVIDER}|${cleanSessionId}|message-quota-exceeded`;
+  if (notices[key]) return {};
+  notices[key] = new Date().toISOString();
+  writeJsonAtomic(path, notices);
   return {
     continue: true,
     systemMessage:
@@ -389,8 +398,9 @@ function loadHookStdin() {
 
 async function syncMain(args) {
   const opts = parseArgs(args, { boolean: new Set(["jieli-hook"]) });
+  let hookData = {};
   try {
-    const hookData = loadHookStdin();
+    hookData = loadHookStdin();
     hookData.trigger = opts.trigger || "";
     writeHandoffContext(hookData);
     captureBaselineFromHook(hookData, opts.trigger || "");
@@ -424,7 +434,7 @@ async function syncMain(args) {
       releaseSyncLock(lock);
     }
   } catch (error) {
-    const response = buildQuotaExceededHookResponse(opts.trigger || "", error);
+    const response = buildQuotaExceededHookResponse(opts.trigger || "", error, hookData.session_id || "");
     if (Object.keys(response).length) console.log(JSON.stringify(response));
     logHookError(`sync ${opts.trigger || ""}: ${formatError(error)}`);
   }
