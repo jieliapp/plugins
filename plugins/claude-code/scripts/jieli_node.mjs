@@ -50,6 +50,7 @@ const CODEX_AUTO_COMPACTION_PREAMBLE_RE =
 const AUTO_COMPACTION_CURRENT_PROGRESS_RE = /^Current progress:\s*(?:\n|$)/i;
 const AUTO_COMPACTION_SECTION_RE = /^(?:Important context(?: and constraints)?|What remains to do|Relevant files|Critical examples):\s*$/im;
 const BASH_NO_OUTPUT_MARKERS = new Set(["", "(Bash completed with no output)"]);
+const QUOTA_NOTICE_FILE = "quota-notices.json";
 const SUPPORTED_IMAGE_MEDIA_TYPES = new Map([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -256,10 +257,18 @@ function buildMissingConfigHookResponse(trigger, missing) {
   };
 }
 
-function buildQuotaExceededHookResponse(trigger, error) {
-  if (String(trigger || "").toLowerCase() !== "sessionstart") return {};
+function buildQuotaExceededHookResponse(trigger, error, sessionId = "") {
+  if (String(trigger || "").toLowerCase() !== "stop") return {};
   const message = formatError(error);
   if (!/\b409\b/.test(message) || !/quota/i.test(message)) return {};
+  const cleanSessionId = String(sessionId || "").trim();
+  if (!cleanSessionId) return {};
+  const path = join(homeDir(), ".jieli", QUOTA_NOTICE_FILE);
+  const notices = readJson(path, {});
+  const key = `claude_code|${cleanSessionId}|message-quota-exceeded`;
+  if (notices[key]) return {};
+  notices[key] = new Date().toISOString();
+  writeJsonAtomic(path, notices);
   return {
     continue: true,
     systemMessage:
@@ -392,8 +401,9 @@ function loadHookStdin() {
 
 async function syncMain(args) {
   const opts = parseArgs(args, { boolean: new Set(["jieli-hook"]) });
+  let hookData = {};
   try {
-    const hookData = loadHookStdin();
+    hookData = loadHookStdin();
     hookData.trigger = opts.trigger || "";
     writeHandoffContext(hookData);
     captureBaselineFromHook(hookData, opts.trigger || "");
@@ -422,7 +432,7 @@ async function syncMain(args) {
       releaseSyncLock(lock);
     }
   } catch (error) {
-    const response = buildQuotaExceededHookResponse(opts.trigger || "", error);
+    const response = buildQuotaExceededHookResponse(opts.trigger || "", error, hookData.session_id || "");
     if (Object.keys(response).length) console.log(JSON.stringify(response));
     logHookError(`sync ${opts.trigger || ""}: ${formatError(error)}`);
   }
