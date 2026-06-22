@@ -650,6 +650,43 @@ test("sync CLI reports missing config and skips missing transcripts without fail
   assert.throws(() => statSync(join(transcriptHome, ".jieli", "hooks.log")));
 });
 
+test("sync CLI reports message quota exceeded only once per session on stop", async () => {
+  const home = makeTempDir();
+  const transcript = join(home, "projects", "quota-session.jsonl");
+  mkdirSync(dirname(transcript), { recursive: true });
+  writeJsonl(transcript, [
+    { type: "user", uuid: "u-quota", sessionId: "cc-quota", cwd: "/Users/alice/work/jieli", gitBranch: "main", message: { role: "user", content: "sync me" } },
+    { type: "assistant", uuid: "a-quota", sessionId: "cc-quota", cwd: "/Users/alice/work/jieli", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+  ]);
+  const { server } = createMockJieliServer({ uploadStatus: 409, uploadResponse: { success: false, message: "message quota exceeded", data: null } });
+  const baseUrl = await listen(server);
+  const env = { HOME: home, PATH: process.env.PATH, JIELI_API_KEY: "secret", JIELI_BASE_URL: baseUrl };
+  try {
+    const sessionStart = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "sessionstart", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "cc-quota", cwd: "/Users/alice/work/jieli" }),
+      env,
+    });
+    assert.equal(sessionStart.status, 0);
+    assert.equal(sessionStart.stdout, "");
+
+    const firstStop = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "stop", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "cc-quota", cwd: "/Users/alice/work/jieli" }),
+      env,
+    });
+    assert.equal(firstStop.status, 0);
+    assert.match(JSON.parse(firstStop.stdout).systemMessage, /message quota exceeded/);
+
+    const secondStop = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "stop", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: transcript, session_id: "cc-quota", cwd: "/Users/alice/work/jieli" }),
+      env,
+    });
+    assert.equal(secondStop.status, 0);
+    assert.equal(secondStop.stdout, "");
+  } finally {
+    await close(server);
+  }
+});
+
 test("pretool hook uploads a Claude session that sessionstart saw before transcript flush", async () => {
   const home = makeTempDir();
   const transcript = join(home, "projects", "late-session.jsonl");
