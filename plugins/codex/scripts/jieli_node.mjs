@@ -540,6 +540,15 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
     if (entry.type !== "response_item") continue;
     const item = await messageFromResponseItem(payload, lineNumber, imageUploader, dataImageUploader);
     if (!item) continue;
+    if (Array.isArray(item)) {
+      for (const nested of item) {
+        if (!nested) continue;
+        if (nested.role === "user" && isEnvironmentContextText(textFromContent(nested.content))) continue;
+        if (nested.role === "user" && !title) title = textFromContent(nested.content).trim().slice(0, 80);
+        messages.push(nested);
+      }
+      continue;
+    }
     if (item.role === "user" && isEnvironmentContextText(textFromContent(item.content))) continue;
     if (item.role === "user" && !title) title = textFromContent(item.content).trim().slice(0, 80);
     messages.push(item);
@@ -623,6 +632,10 @@ async function normalizeResponseMessage(payload, lineNumber, imageUploader = nul
   let content = await normalizeContentBlocks(payload.content, role, imageUploader, dataImageUploader);
   if (content == null) return null;
   if (isHandoffSummaryText(textFromContent(content))) content = COMPACTION_PLACEHOLDER;
+  if (role === "user") {
+    const subagentNotification = subagentNotificationMessages(content, lineNumber);
+    if (subagentNotification) return subagentNotification;
+  }
   if (role === "user" && shouldSkipUserMessage(content)) return null;
   const item = { role: role || "assistant", content, message_id: String(payload.id || `line-${lineNumber}`) };
   if (typeof payload.phase === "string" && payload.phase) item.phase = payload.phase;
@@ -779,6 +792,56 @@ function shouldSkipUserMessage(content) {
     "Base directory for this skill:",
     "# AGENTS.md instructions",
   ].some((prefix) => text.startsWith(prefix));
+}
+
+function subagentNotificationMessages(content, lineNumber) {
+  const text = textFromContent(content).trim();
+  const notification = parseSubagentNotification(text);
+  if (!notification) return null;
+  const callId = `subagent-notification-${lineNumber}`;
+  const agentPath = typeof notification.agent_path === "string" ? notification.agent_path : "";
+  return [
+    {
+      role: "assistant",
+      message_id: `${callId}-use`,
+      content: [{
+        type: "tool_use",
+        id: callId,
+        name: "subagent",
+        input: agentPath ? { agent_path: agentPath } : {},
+      }],
+    },
+    {
+      role: "tool",
+      message_id: `${callId}-result`,
+      content: [{
+        type: "tool_result",
+        tool_use_id: callId,
+        content: "",
+        run: {
+          status: subagentNotificationStatus(notification),
+          result: { output: truncateToolOutput(redactText(JSON.stringify(notification.status ?? notification))) },
+        },
+      }],
+    },
+  ];
+}
+
+function parseSubagentNotification(text) {
+  const match = /^<subagent_notification>\s*([\s\S]*?)\s*<\/subagent_notification>$/.exec(String(text || "").trim());
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    return parsed && typeof parsed === "object" ? redactJson(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+function subagentNotificationStatus(notification) {
+  const status = notification && typeof notification.status === "object" ? notification.status : {};
+  if (status.failed || status.error) return "error";
+  return "completed";
 }
 
 function isEnvironmentContextText(text) {

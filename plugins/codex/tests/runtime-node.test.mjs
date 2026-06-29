@@ -210,6 +210,43 @@ test("normalizes Codex apply_patch, exec_command, and nonzero tool exits", async
   assert.equal(shellResult.run.result.exitCode, 1);
 });
 
+test("normalizes Codex subagent notifications as tool results", async () => {
+  const tmp = makeTempDir();
+  const subagentNotification = [
+    "<subagent_notification>",
+    JSON.stringify({
+      agent_path: "019f11e6-dc05-7c13-88cc-27c23bf8df3a",
+      status: {
+        completed: "只读审查完成，没改文件。明确建议删除的只有一个。",
+      },
+    }),
+    "</subagent_notification>",
+  ].join("\n");
+  const transcript = join(tmp, "session.jsonl");
+  writeJsonl(transcript, [
+    { type: "session_meta", payload: { id: "codex-subagent", cwd: "/Users/alice/work/jieli" } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "review tests" }] } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: subagentNotification }] } },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook({ session_id: "codex-subagent", transcript_path: transcript }, "https://jieli.example.test");
+  assert.deepEqual(payload.thread.messages.map((message) => message.role), ["user", "assistant", "tool"]);
+  assert.equal(payload.thread.messages[0].content, "review tests");
+  assert.deepEqual(payload.thread.messages[1].content[0], {
+    type: "tool_use",
+    id: "subagent-notification-3",
+    name: "subagent",
+    input: { agent_path: "019f11e6-dc05-7c13-88cc-27c23bf8df3a" },
+  });
+  const subagentResult = payload.thread.messages[2].content[0];
+  assert.equal(subagentResult.type, "tool_result");
+  assert.equal(subagentResult.tool_use_id, "subagent-notification-3");
+  assert.equal(subagentResult.run.status, "completed");
+  assert.match(subagentResult.run.result.output, /只读审查完成/);
+  const raw = JSON.stringify(payload);
+  assert.doesNotMatch(raw, /subagent_notification|role":"user","content":"只读审查/);
+});
+
 test("filters Codex handoff summaries, git directives, internal context, loaded instructions, and file mention prefixes", async () => {
   const tmp = makeTempDir();
   const longSummary = "**Handoff Summary**\n\n**Current task**\n" + "do not upload this summary\n".repeat(20);
