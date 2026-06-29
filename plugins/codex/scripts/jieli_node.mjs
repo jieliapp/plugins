@@ -451,7 +451,7 @@ async function buildPayloadFromHook(hookData, baseUrl = null, imageUploader = nu
   const providerThreadId = jieliThreadId(sessionId);
   const base = (baseUrl || optionalEnv("JIELI_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
   const messages = transcript.messages;
-  const title = transcript.title || titleFromMessages(messages);
+  const title = codexDesktopTitle(sessionId) || transcript.title || titleFromMessages(messages);
   const thread = {
     id: providerThreadId,
     title,
@@ -1256,6 +1256,49 @@ function titleFromMessages(messages) {
     if (text && text !== COMPACTION_PLACEHOLDER) return text.slice(0, 80);
   }
   return "Codex session";
+}
+
+function codexDesktopTitle(sessionId) {
+  if (!sessionId) return "";
+  for (const candidate of codexDesktopTitleCandidates()) {
+    const title = readSqliteTitle(candidate.path, candidate.sql, sessionId);
+    if (title) return redactText(title).slice(0, 80);
+  }
+  return "";
+}
+
+function codexDesktopTitleCandidates() {
+  const appRoot = join(homedir(), "Library", "Application Support", "Codex", "sqlite");
+  return [
+    {
+      path: join(appRoot, "state_5.sqlite"),
+      sql: "select title from threads where id = ? limit 1",
+    },
+    {
+      path: join(appRoot, "codex-dev.db"),
+      sql: "select display_title from local_thread_catalog where thread_id = ? and missing_candidate = 0 order by source_updated_at desc limit 1",
+    },
+  ];
+}
+
+function readSqliteTitle(dbPath, sql, sessionId) {
+  if (!dbPath || !existsSync(dbPath)) return "";
+  const sqlite = spawnSync("sqlite3", ["-readonly", "-json", dbPath, bindSqliteString(sql, sessionId)], {
+    encoding: "utf8",
+    timeout: 1000,
+  });
+  if (sqlite.status !== 0 || sqlite.error) return "";
+  try {
+    const rows = JSON.parse(sqlite.stdout || "[]");
+    const value = rows && rows[0] && Object.values(rows[0])[0];
+    return typeof value === "string" ? value.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function bindSqliteString(sql, value) {
+  return sql.replace("?", `'${String(value).replace(/'/g, "''")}'`);
 }
 
 function timestampMs(value) {

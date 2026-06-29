@@ -499,6 +499,7 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
   let cwd = "";
   let branch = "";
   let model = "";
+  let title = "";
   let createdMs = 0;
   let updatedMs = 0;
   let pendingBashIndex = null;
@@ -510,6 +511,11 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
     try {
       entry = JSON.parse(line);
     } catch {
+      continue;
+    }
+    if (entry.type === "ai-title") {
+      const aiTitle = typeof entry.aiTitle === "string" ? entry.aiTitle.trim() : "";
+      if (aiTitle) title = aiTitle.slice(0, 80);
       continue;
     }
     if (!["user", "assistant"].includes(entry.type)) continue;
@@ -571,7 +577,7 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
       updatedMs = stampMs;
     }
   }
-  return { id: sessionId, cwd, branch, model, created_ms: createdMs, updated_ms: updatedMs || createdMs, messages };
+  return { id: sessionId, cwd, branch, model, title, created_ms: createdMs, updated_ms: updatedMs || createdMs, messages };
 }
 
 async function normalizeContent(content, imageUploader = null) {

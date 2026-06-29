@@ -25,6 +25,7 @@ import {
 
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = dirname(dirname(pluginRoot));
+const hasSqlite3 = spawnSync("sqlite3", ["--version"], { encoding: "utf8" }).status === 0;
 
 function pluginBinFiles() {
   const binDir = join(pluginRoot, "bin");
@@ -147,6 +148,39 @@ test("builds Codex payload from JSONL while redacting and skipping private items
   const raw = JSON.stringify(payload);
   assert.match(raw, /\[REDACTED:/);
   assert.doesNotMatch(raw, /sk-ant-secret-value|abc\.def\.ghi|tool\.secret|tool-secret|developer instructions|private reasoning|encrypted/);
+});
+
+test("uses Codex Desktop title metadata when it updates after thread creation", { skip: !hasSqlite3 }, async () => {
+  const tmp = makeTempDir();
+  const appDbDir = join(tmp, "Library", "Application Support", "Codex", "sqlite");
+  mkdirSync(appDbDir, { recursive: true });
+  const stateDb = join(appDbDir, "state_5.sqlite");
+  const setup = spawnSync("sqlite3", [
+    stateDb,
+    [
+      "create table threads (id text primary key, title text not null);",
+      "insert into threads (id, title) values ('codex-delayed-title', '完善 Neo 子代理租约转发');",
+    ].join("\n"),
+  ], { encoding: "utf8" });
+  assert.equal(setup.status, 0, setup.stderr);
+
+  const transcript = join(tmp, "rollout-2026-06-08T00-00-00-codex-delayed-title.jsonl");
+  writeJsonl(transcript, [
+    { type: "session_meta", payload: { id: "codex-delayed-title", cwd: "/Users/alice/work/jieli" } },
+    {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "这个thread https://jieli.app/threads/T-old 开头还是 instructions" }],
+      },
+    },
+  ]);
+
+  await withEnv({ HOME: tmp }, async () => {
+    const payload = await runtime.buildPayloadFromHook({ session_id: "codex-delayed-title", transcript_path: transcript }, "https://jieli.example.test");
+    assert.equal(payload.thread.title, "完善 Neo 子代理租约转发");
+  });
 });
 
 test("Codex transcript session id wins over hook session id and can be found from CODEX_HOME", async () => {

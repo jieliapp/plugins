@@ -251,6 +251,33 @@ test("builds Claude payload from JSONL while redacting secrets and preserving to
   assert.doesNotMatch(raw, /sk-ant-secret-value|abc\.def\.ghi|tool\.secret/);
 });
 
+test("uses Claude Code ai-title when it updates after thread creation", async () => {
+  const tmp = makeTempDir();
+  const transcript = join(tmp, "session.jsonl");
+  writeJsonl(transcript, [
+    {
+      type: "user",
+      uuid: "u-title",
+      sessionId: "8e8c700c-8d86-4926-adf0-904d0bd98b23",
+      cwd: "/Users/alice/work/sub2api",
+      message: { role: "user", content: "怎样把amp固定在 0.0.1781732974-ge41365 这个版本？" },
+    },
+    {
+      type: "ai-title",
+      sessionId: "8e8c700c-8d86-4926-adf0-904d0bd98b23",
+      aiTitle: "固定 amp 到指定版本",
+    },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook(
+    { session_id: "8e8c700c-8d86-4926-adf0-904d0bd98b23", transcript_path: transcript },
+    "https://jieli.example.test",
+  );
+
+  assert.equal(payload.thread.title, "固定 amp 到指定版本");
+  assert.equal(payload.thread.messages[0].content, "怎样把amp固定在 0.0.1781732974-ge41365 这个版本？");
+});
+
 test("builds repo metadata from git remote without inferring repo from local folders", async () => {
   const tmp = makeTempDir();
   const repo = join(tmp, "repo");
