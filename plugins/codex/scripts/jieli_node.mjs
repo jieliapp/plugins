@@ -499,6 +499,8 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
   let title = "";
   let createdMs = 0;
   let updatedMs = 0;
+  const pendingSubagentSpawns = new Map();
+  const subagentSpawnInputs = new Map();
   const lines = readFileSync(path, "utf8").split(/\r?\n/);
   let lineNumber = 0;
   for (const line of lines) {
@@ -538,7 +540,8 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
       continue;
     }
     if (entry.type !== "response_item") continue;
-    const item = await messageFromResponseItem(payload, lineNumber, imageUploader, dataImageUploader);
+    recordSubagentSpawn(payload, pendingSubagentSpawns, subagentSpawnInputs);
+    const item = await messageFromResponseItem(payload, lineNumber, imageUploader, dataImageUploader, subagentSpawnInputs);
     if (!item) continue;
     if (Array.isArray(item)) {
       for (const nested of item) {
@@ -616,24 +619,24 @@ async function messageFromUserEvent(payload, lineNumber, imageUploader = null) {
   return { role: "user", content, message_id: `user-event-${lineNumber}` };
 }
 
-async function messageFromResponseItem(payload, lineNumber, imageUploader = null, dataImageUploader = null) {
+async function messageFromResponseItem(payload, lineNumber, imageUploader = null, dataImageUploader = null, subagentSpawnInputs = new Map()) {
   const type = payload.type;
   if (type === "reasoning") return null;
-  if (type === "message") return await normalizeResponseMessage(payload, lineNumber, imageUploader, dataImageUploader);
+  if (type === "message") return await normalizeResponseMessage(payload, lineNumber, imageUploader, dataImageUploader, subagentSpawnInputs);
   if (type === "function_call") return normalizeFunctionCall(payload, lineNumber);
   if (type === "custom_tool_call") return normalizeCustomToolCall(payload, lineNumber);
   if (type === "function_call_output" || type === "custom_tool_call_output") return normalizeFunctionOutput(payload, lineNumber);
   return null;
 }
 
-async function normalizeResponseMessage(payload, lineNumber, imageUploader = null, dataImageUploader = null) {
+async function normalizeResponseMessage(payload, lineNumber, imageUploader = null, dataImageUploader = null, subagentSpawnInputs = new Map()) {
   const role = String(payload.role || "");
   if (role === "system" || role === "developer") return null;
   let content = await normalizeContentBlocks(payload.content, role, imageUploader, dataImageUploader);
   if (content == null) return null;
   if (isHandoffSummaryText(textFromContent(content))) content = COMPACTION_PLACEHOLDER;
   if (role === "user") {
-    const subagentNotification = subagentNotificationMessages(content, lineNumber);
+    const subagentNotification = subagentNotificationMessages(content, lineNumber, subagentSpawnInputs);
     if (subagentNotification) return subagentNotification;
   }
   if (role === "user" && shouldSkipUserMessage(content)) return null;
@@ -794,12 +797,44 @@ function shouldSkipUserMessage(content) {
   ].some((prefix) => text.startsWith(prefix));
 }
 
-function subagentNotificationMessages(content, lineNumber) {
+function recordSubagentSpawn(payload, pendingSubagentSpawns, subagentSpawnInputs) {
+  if (!payload || typeof payload !== "object") return;
+  if (payload.type === "function_call" && payload.namespace === "multi_agent_v1" && payload.name === "spawn_agent") {
+    const callId = String(payload.call_id || payload.id || "");
+    if (!callId) return;
+    const input = parseToolArguments(payload.arguments);
+    if (input && typeof input === "object") pendingSubagentSpawns.set(callId, input);
+    return;
+  }
+  if (payload.type !== "function_call_output") return;
+  const callId = String(payload.call_id || payload.id || "");
+  const input = pendingSubagentSpawns.get(callId);
+  if (!input) return;
+  pendingSubagentSpawns.delete(callId);
+  const output = parseSubagentSpawnOutput(payload.output);
+  if (output.agentId) subagentSpawnInputs.set(output.agentId, { input, nickname: output.nickname });
+}
+
+function parseSubagentSpawnOutput(output) {
+  if (typeof output !== "string") return {};
+  try {
+    const parsed = JSON.parse(output);
+    return {
+      agentId: typeof parsed.agent_id === "string" ? parsed.agent_id : "",
+      nickname: typeof parsed.nickname === "string" ? parsed.nickname : "",
+    };
+  } catch {
+    return {};
+  }
+}
+
+function subagentNotificationMessages(content, lineNumber, subagentSpawnInputs = new Map()) {
   const text = textFromContent(content).trim();
   const notification = parseSubagentNotification(text);
   if (!notification) return null;
   const callId = `subagent-notification-${lineNumber}`;
   const agentPath = typeof notification.agent_path === "string" ? notification.agent_path : "";
+  const spawn = agentPath ? subagentSpawnInputs.get(agentPath) : null;
   return [
     {
       role: "assistant",
@@ -808,7 +843,7 @@ function subagentNotificationMessages(content, lineNumber) {
         type: "tool_use",
         id: callId,
         name: "subagent",
-        input: agentPath ? { agent_path: agentPath } : {},
+        input: subagentNotificationInput(agentPath, spawn),
       }],
     },
     {
@@ -825,6 +860,19 @@ function subagentNotificationMessages(content, lineNumber) {
       }],
     },
   ];
+}
+
+function subagentNotificationInput(agentPath, spawn) {
+  const input = {};
+  if (agentPath) input.agent_path = agentPath;
+  const nickname = spawn && typeof spawn.nickname === "string" ? spawn.nickname : "";
+  if (nickname) input.nickname = nickname;
+  const spawnInput = spawn && typeof spawn.input === "object" ? spawn.input : null;
+  if (!spawnInput || typeof spawnInput !== "object") return input;
+  for (const key of ["agent_type", "message", "items", "model", "reasoning_effort", "service_tier", "fork_context"]) {
+    if (Object.hasOwn(spawnInput, key)) input[key] = spawnInput[key];
+  }
+  return input;
 }
 
 function parseSubagentNotification(text) {

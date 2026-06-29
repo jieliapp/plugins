@@ -212,6 +212,7 @@ test("normalizes Codex apply_patch, exec_command, and nonzero tool exits", async
 
 test("normalizes Codex subagent notifications as tool results", async () => {
   const tmp = makeTempDir();
+  const subagentPrompt = "在 /repo 做只读测试审查。不要修改文件。输出废测试清单。";
   const subagentNotification = [
     "<subagent_notification>",
     JSON.stringify({
@@ -226,21 +227,52 @@ test("normalizes Codex subagent notifications as tool results", async () => {
   writeJsonl(transcript, [
     { type: "session_meta", payload: { id: "codex-subagent", cwd: "/Users/alice/work/jieli" } },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "review tests" }] } },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        call_id: "call-spawn-agent",
+        name: "spawn_agent",
+        namespace: "multi_agent_v1",
+        arguments: JSON.stringify({ agent_type: "explorer", message: subagentPrompt, fork_context: false }),
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call-spawn-agent",
+        output: JSON.stringify({ agent_id: "019f11e6-dc05-7c13-88cc-27c23bf8df3a", nickname: "Beauvoir" }),
+      },
+    },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: subagentNotification }] } },
   ]);
 
   const payload = await runtime.buildPayloadFromHook({ session_id: "codex-subagent", transcript_path: transcript }, "https://jieli.example.test");
-  assert.deepEqual(payload.thread.messages.map((message) => message.role), ["user", "assistant", "tool"]);
+  assert.deepEqual(payload.thread.messages.map((message) => message.role), ["user", "assistant", "tool", "assistant", "tool"]);
   assert.equal(payload.thread.messages[0].content, "review tests");
   assert.deepEqual(payload.thread.messages[1].content[0], {
     type: "tool_use",
-    id: "subagent-notification-3",
-    name: "subagent",
-    input: { agent_path: "019f11e6-dc05-7c13-88cc-27c23bf8df3a" },
+    id: "call-spawn-agent",
+    name: "spawn_agent",
+    input: { agent_type: "explorer", message: subagentPrompt, fork_context: false },
   });
-  const subagentResult = payload.thread.messages[2].content[0];
+  assert.equal(payload.thread.messages[2].content[0].tool_use_id, "call-spawn-agent");
+  assert.deepEqual(payload.thread.messages[3].content[0], {
+    type: "tool_use",
+    id: "subagent-notification-5",
+    name: "subagent",
+    input: {
+      agent_path: "019f11e6-dc05-7c13-88cc-27c23bf8df3a",
+      nickname: "Beauvoir",
+      agent_type: "explorer",
+      message: subagentPrompt,
+      fork_context: false,
+    },
+  });
+  const subagentResult = payload.thread.messages[4].content[0];
   assert.equal(subagentResult.type, "tool_result");
-  assert.equal(subagentResult.tool_use_id, "subagent-notification-3");
+  assert.equal(subagentResult.tool_use_id, "subagent-notification-5");
   assert.equal(subagentResult.run.status, "completed");
   assert.match(subagentResult.run.result.output, /只读审查完成/);
   const raw = JSON.stringify(payload);
