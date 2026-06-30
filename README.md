@@ -24,39 +24,24 @@ Then enable the plugin and trust its hooks with `/hooks`.
 
 ## Configure the API key
 
-Get an API key from [https://jieli.app](https://jieli.app). Recommended for both Claude Code and Codex: write `~/.config/jieli/settings.json`, which works even after the agent is already running:
-
-```bash
-mkdir -p ~/.config/jieli
-node - <<'JS'
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-
-const settingsPath = path.join(os.homedir(), ".config", "jieli", "settings.json");
-fs.writeFileSync(
-  settingsPath,
-  JSON.stringify(
-    {
-      api_key: "your-jieli-api-key",
-      base_url: "https://jieli.app",
-      commit_trailer: true
-    },
-    null,
-    2,
-  ) + "\n",
-  { mode: 0o600 },
-);
-JS
-```
-
-`commit_trailer` is optional and defaults to `true`. Set it to `false` to disable the automatic `Jieli-Thread` trailer added by the `PreToolUse` hook.
-
-You can also use an environment variable before starting the agent:
+Get an API key from [https://jieli.app](https://jieli.app). You can use an environment variable before starting the agent:
 
 ```bash
 export JIELI_API_KEY="your-jieli-api-key"
 ```
+
+Recommended for both Claude Code and Codex: write this file, which works even after the agent is already running:
+
+Path: `~/.config/jieli/settings.json`
+
+```json
+{
+  "api_key": "your-jieli-api-key",
+  "commit_trailer": true
+}
+```
+
+`commit_trailer` is optional and defaults to `true`. Set it to `false` to disable the automatic `Jieli-Thread` trailer added by the `PreToolUse` hook.
 
 ## What It Does
 
