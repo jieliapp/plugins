@@ -300,10 +300,10 @@ test("normalizes Codex subagent notifications as tool results", async () => {
       agent_path: "019f11e6-dc05-7c13-88cc-27c23bf8df3a",
       nickname: "Beauvoir",
       agent_type: "explorer",
-      message: subagentPrompt,
       fork_context: false,
     },
   });
+  assert.equal(Object.hasOwn(payload.thread.messages[3].content[0].input, "message"), false);
   const subagentResult = payload.thread.messages[4].content[0];
   assert.equal(subagentResult.type, "tool_result");
   assert.equal(subagentResult.tool_use_id, "subagent-notification-5");

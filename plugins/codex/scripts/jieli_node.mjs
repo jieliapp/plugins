@@ -869,7 +869,7 @@ function subagentNotificationInput(agentPath, spawn) {
   if (nickname) input.nickname = nickname;
   const spawnInput = spawn && typeof spawn.input === "object" ? spawn.input : null;
   if (!spawnInput || typeof spawnInput !== "object") return input;
-  for (const key of ["agent_type", "message", "items", "model", "reasoning_effort", "service_tier", "fork_context"]) {
+  for (const key of ["agent_type", "items", "model", "reasoning_effort", "service_tier", "fork_context"]) {
     if (Object.hasOwn(spawnInput, key)) input[key] = spawnInput[key];
   }
   return input;
