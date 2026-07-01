@@ -51,6 +51,7 @@ Path: `~/.config/jieli/settings.json`
 - Adds best-effort `Jieli-Thread` trailers to simple Claude Code and Codex `git commit` commands.
 - Provides the `jieli-read-thread` skill for reading known Jieli thread links or ids.
 - Provides the `jieli-find-thread` skill for searching synced Jieli threads by keywords, repo, file, topic, or clues.
+- Provides the `handoff` skill for creating a paste-ready continuation prompt for a fresh agent, including the current Jieli thread id and URL when available.
 - Redacts common secrets before upload.
 
 ## Redaction
