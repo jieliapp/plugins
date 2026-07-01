@@ -244,7 +244,7 @@ test("normalizes Codex apply_patch, exec_command, and nonzero tool exits", async
   assert.equal(shellResult.run.result.exitCode, 1);
 });
 
-test("normalizes Codex subagent notifications as tool results", async () => {
+test("filters Codex subagent notifications after wait_agent returns", async () => {
   const tmp = makeTempDir();
   const subagentPrompt = "在 /repo 做只读测试审查。不要修改文件。输出废测试清单。";
   const subagentNotification = [
@@ -279,6 +279,24 @@ test("normalizes Codex subagent notifications as tool results", async () => {
         output: JSON.stringify({ agent_id: "019f11e6-dc05-7c13-88cc-27c23bf8df3a", nickname: "Beauvoir" }),
       },
     },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        call_id: "call-wait-agent",
+        name: "wait_agent",
+        namespace: "multi_agent_v1",
+        arguments: JSON.stringify({ targets: ["019f11e6-dc05-7c13-88cc-27c23bf8df3a"], timeout_ms: 600000 }),
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call-wait-agent",
+        output: JSON.stringify({ status: { "019f11e6-dc05-7c13-88cc-27c23bf8df3a": { completed: "只读审查完成，没改文件。明确建议删除的只有一个。" } } }),
+      },
+    },
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: subagentNotification }] } },
   ]);
 
@@ -294,23 +312,17 @@ test("normalizes Codex subagent notifications as tool results", async () => {
   assert.equal(payload.thread.messages[2].content[0].tool_use_id, "call-spawn-agent");
   assert.deepEqual(payload.thread.messages[3].content[0], {
     type: "tool_use",
-    id: "subagent-notification-5",
-    name: "subagent",
-    input: {
-      agent_path: "019f11e6-dc05-7c13-88cc-27c23bf8df3a",
-      nickname: "Beauvoir",
-      agent_type: "explorer",
-      fork_context: false,
-    },
+    id: "call-wait-agent",
+    name: "wait_agent",
+    input: { targets: ["019f11e6-dc05-7c13-88cc-27c23bf8df3a"], timeout_ms: 600000 },
   });
-  assert.equal(Object.hasOwn(payload.thread.messages[3].content[0].input, "message"), false);
-  const subagentResult = payload.thread.messages[4].content[0];
-  assert.equal(subagentResult.type, "tool_result");
-  assert.equal(subagentResult.tool_use_id, "subagent-notification-5");
-  assert.equal(subagentResult.run.status, "completed");
-  assert.match(subagentResult.run.result.output, /只读审查完成/);
+  const waitResult = payload.thread.messages[4].content[0];
+  assert.equal(waitResult.type, "tool_result");
+  assert.equal(waitResult.tool_use_id, "call-wait-agent");
+  assert.equal(waitResult.run.status, "completed");
+  assert.match(waitResult.run.result.output, /只读审查完成/);
   const raw = JSON.stringify(payload);
-  assert.doesNotMatch(raw, /subagent_notification|role":"user","content":"只读审查/);
+  assert.doesNotMatch(raw, /subagent_notification|name":"subagent"|role":"user","content":"只读审查/);
 });
 
 test("filters Codex handoff summaries, git directives, internal context, loaded instructions, and file mention prefixes", async () => {
