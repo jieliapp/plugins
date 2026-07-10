@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -67,7 +67,7 @@ const SUPPORTED_IMAGE_MEDIA_TYPES = new Map([
 const pluginRoot = process.env.PLUGIN_ROOT || join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function usage() {
-  console.error("Usage: jieli_node.mjs <sync|commit-trailer|read-thread|find-threads|handoff-info> [args...]");
+  console.error("Usage: jieli_node.mjs <sync|archive-sync|commit-trailer|read-thread|find-threads|handoff-info> [args...]");
 }
 
 export async function main(forcedCommand = "") {
@@ -76,6 +76,7 @@ export async function main(forcedCommand = "") {
   const args = forcedCommand ? argv : argv;
   try {
     if (command === "sync") return await syncMain(args);
+    if (command === "archive-sync") return await archiveSyncMain(args);
     if (command === "commit-trailer") return commitTrailerMain(args);
     if (command === "read-thread") return await readThreadMain(args);
     if (command === "find-threads") return await findThreadsMain(args);
@@ -430,6 +431,7 @@ async function syncMain(args) {
       await uploadPayload(payload, baseUrl, apiKey);
       const providerThreadId = payload.thread.id;
       writeSessionMapping(codexSessionId(providerThreadId), baseUrl, providerThreadId, transcriptPath);
+      startArchiveSyncWorker();
     } finally {
       releaseSyncLock(lock);
     }
@@ -439,6 +441,30 @@ async function syncMain(args) {
     logHookError(`sync ${opts.trigger || ""}: ${formatError(error)}`);
   }
   return 0;
+}
+
+async function archiveSyncMain(args) {
+  parseArgs(args);
+  const lock = acquireSyncLock("archive-global");
+  if (!lock.acquired) return 0;
+  try {
+    const baseUrl = (optionalEnv("JIELI_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
+    const apiKey = requiredEnv("JIELI_API_KEY");
+    await reconcileArchivedSessions(baseUrl, apiKey);
+  } finally {
+    releaseSyncLock(lock);
+  }
+  return 0;
+}
+
+function startArchiveSyncWorker() {
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "archive-sync"], {
+    detached: true,
+    env: process.env,
+    stdio: "ignore",
+  });
+  child.on("error", (error) => logHookError(`start archive sync: ${formatError(error)}`));
+  child.unref();
 }
 
 async function buildPayloadFromHook(hookData, baseUrl = null, imageUploader = null, dataImageUploader = null) {
@@ -1273,6 +1299,16 @@ async function uploadPayload(payload, baseUrl, apiKey) {
   return response.json();
 }
 
+async function archiveThread(providerThreadId, archived, baseUrl, apiKey) {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/+$/, "")}/plugin/threads/archive`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ provider: PROVIDER, provider_thread_id: providerThreadId, archived }),
+  });
+  if (!response.ok) throw new Error(await formatHttpError(response));
+  return response.json();
+}
+
 async function uploadAttachment(path, baseUrl, apiKey) {
   const mediaType = mediaTypeForImage(path);
   if (!mediaType) throw new Error("unsupported image media type");
@@ -1334,6 +1370,89 @@ function writeSessionMapping(sessionId, baseUrl, providerThreadId = "", sessionP
     updated_at: new Date().toISOString(),
   };
   writeJsonAtomic(path, mapping);
+}
+
+async function reconcileArchivedSessions(baseUrl, apiKey) {
+  const mappingPath = join(homeDir(), ".jieli", SESSION_MAPPING_FILE);
+  const mapping = readJson(mappingPath, {});
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  const roots = new Map();
+
+  for (const [sessionId, entry] of Object.entries(mapping)) {
+    if (!entry || typeof entry !== "object" || String(entry.base_url || "").replace(/\/+$/, "") !== normalizedBaseUrl) continue;
+    const root = codexDataRootFromSessionPath(entry.session_path);
+    if (!root) continue;
+    if (!roots.has(root)) roots.set(root, []);
+    roots.get(root).push(sessionId);
+  }
+
+  let mappingChanged = false;
+  for (const [root, sessionIds] of roots) {
+    const active = rolloutSessionIds(join(root, "sessions"), sessionIds);
+    const archived = rolloutSessionIds(join(root, "archived_sessions"), sessionIds);
+    for (const sessionId of sessionIds) {
+      const isActive = active.has(sessionId);
+      const isArchived = archived.has(sessionId);
+      if (isActive === isArchived) continue;
+
+      const observed = isArchived;
+      const entry = mapping[sessionId];
+      if (!Object.hasOwn(entry, "archive_synced") && !observed) {
+        entry.archive_synced = false;
+        mappingChanged = true;
+        continue;
+      }
+      if (entry.archive_synced === observed) continue;
+
+      try {
+        await archiveThread(entry.provider_thread_id || jieliThreadId(sessionId), observed, normalizedBaseUrl, apiKey);
+      } catch (error) {
+        logHookError(`archive sync ${sessionId}: ${formatError(error)}`);
+        continue;
+      }
+      entry.archive_synced = observed;
+      entry.archive_synced_at = new Date().toISOString();
+      mappingChanged = true;
+    }
+  }
+
+  if (mappingChanged) writeJsonAtomic(mappingPath, mapping);
+}
+
+function codexDataRootFromSessionPath(sessionPath) {
+  let current = dirname(String(sessionPath || ""));
+  while (current && current !== dirname(current)) {
+    if (basename(current) === "sessions") return dirname(current);
+    current = dirname(current);
+  }
+  return "";
+}
+
+function rolloutSessionIds(root, sessionIds) {
+  const found = new Set();
+  if (!existsSync(root)) return found;
+  const pending = [root];
+  while (pending.length) {
+    const dir = pending.pop();
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(path);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      for (const sessionId of sessionIds) {
+        if (entry.name.includes(sessionId)) found.add(sessionId);
+      }
+    }
+  }
+  return found;
 }
 
 function logHookError(message) {
@@ -1854,6 +1973,7 @@ export {
   optionalEnv,
   parseTranscript,
   readJson,
+  reconcileArchivedSessions,
   redactJson,
   redactText,
   releaseSyncLock,

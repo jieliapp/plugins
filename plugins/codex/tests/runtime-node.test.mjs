@@ -780,6 +780,164 @@ test("configuration, upload, lock, session mapping, and missing transcript behav
   assert.throws(() => statSync(join(transcriptHome, ".jieli", "hooks.log")));
 });
 
+test("archive reconciliation sends only changed Codex session states", async () => {
+  const home = makeTempDir();
+  const codexRoot = join(home, "Codex");
+  const activePath = join(codexRoot, "sessions", "2026", "07", "11", "rollout-active-session.jsonl");
+  const archivedOriginalPath = join(codexRoot, "sessions", "2026", "07", "10", "rollout-archived-session.jsonl");
+  const archivedPath = join(codexRoot, "archived_sessions", "rollout-archived-session.jsonl");
+  mkdirSync(dirname(activePath), { recursive: true });
+  mkdirSync(dirname(archivedOriginalPath), { recursive: true });
+  mkdirSync(dirname(archivedPath), { recursive: true });
+  writeJsonl(activePath, [{ type: "session_meta", payload: { id: "active-session" } }]);
+  writeJsonl(archivedPath, [{ type: "session_meta", payload: { id: "archived-session" } }]);
+
+  const { server, state } = createMockJieliServer();
+  const baseUrl = await listen(server);
+  try {
+    await withEnv({ HOME: home }, async () => {
+      runtime.writeSessionMapping("active-session", baseUrl, "T-active-session", activePath);
+      runtime.writeSessionMapping("archived-session", baseUrl, "T-archived-session", archivedOriginalPath);
+
+      assert.equal(typeof runtime.reconcileArchivedSessions, "function");
+      await runtime.reconcileArchivedSessions(baseUrl, "secret");
+      assert.deepEqual(state.archives.map((request) => request.body), [
+        { provider: "codex", provider_thread_id: "T-archived-session", archived: true },
+      ]);
+
+      const mappingPath = join(home, ".jieli", "codex-sessions.json");
+      const firstMapping = JSON.parse(readFileSync(mappingPath, "utf8"));
+      assert.equal(firstMapping["active-session"].archive_synced, false);
+      assert.equal(firstMapping["archived-session"].archive_synced, true);
+
+      await runtime.reconcileArchivedSessions(baseUrl, "secret");
+      assert.equal(state.archives.length, 1);
+    });
+  } finally {
+    await close(server);
+  }
+});
+
+test("archive reconciliation keeps failed states retryable and continues other sessions", async () => {
+  const home = makeTempDir();
+  const codexRoot = join(home, "Codex");
+  const archivedRoot = join(codexRoot, "archived_sessions");
+  mkdirSync(archivedRoot, { recursive: true });
+  writeJsonl(join(archivedRoot, "rollout-failing-session.jsonl"), [{ type: "session_meta", payload: { id: "failing-session" } }]);
+  writeJsonl(join(archivedRoot, "rollout-success-session.jsonl"), [{ type: "session_meta", payload: { id: "success-session" } }]);
+
+  const mock = createMockJieliServer({
+    archiveStatus: (request) => request.body.provider_thread_id === "T-failing-session" ? 500 : 200,
+  });
+  const baseUrl = await listen(mock.server);
+  try {
+    await withEnv({ HOME: home }, async () => {
+      runtime.writeSessionMapping(
+        "failing-session",
+        baseUrl,
+        "T-failing-session",
+        join(codexRoot, "sessions", "2026", "07", "11", "rollout-failing-session.jsonl"),
+      );
+      runtime.writeSessionMapping(
+        "success-session",
+        baseUrl,
+        "T-success-session",
+        join(codexRoot, "sessions", "2026", "07", "11", "rollout-success-session.jsonl"),
+      );
+
+      await runtime.reconcileArchivedSessions(baseUrl, "secret");
+
+      const mapping = JSON.parse(readFileSync(join(home, ".jieli", "codex-sessions.json"), "utf8"));
+      assert.equal(Object.hasOwn(mapping["failing-session"], "archive_synced"), false);
+      assert.equal(mapping["success-session"].archive_synced, true);
+      assert.deepEqual(mock.state.archives.map((request) => request.body.provider_thread_id), [
+        "T-failing-session",
+        "T-success-session",
+      ]);
+    });
+  } finally {
+    await close(mock.server);
+  }
+});
+
+test("archive sync worker command reconciles mapped sessions", async () => {
+  const home = makeTempDir();
+  const codexRoot = join(home, "Codex");
+  const archivedPath = join(codexRoot, "archived_sessions", "rollout-worker-session.jsonl");
+  mkdirSync(dirname(archivedPath), { recursive: true });
+  writeJsonl(archivedPath, [{ type: "session_meta", payload: { id: "worker-session" } }]);
+
+  const mock = createMockJieliServer();
+  const baseUrl = await listen(mock.server);
+  try {
+    await withEnv({ HOME: home }, async () => {
+      runtime.writeSessionMapping(
+        "worker-session",
+        baseUrl,
+        "T-worker-session",
+        join(codexRoot, "sessions", "2026", "07", "11", "rollout-worker-session.jsonl"),
+      );
+    });
+    const worker = await runNode([join(pluginRoot, "scripts", "jieli_node.mjs"), "archive-sync"], {
+      env: { HOME: home, PATH: process.env.PATH, JIELI_API_KEY: "secret", JIELI_BASE_URL: baseUrl },
+    });
+
+    assert.equal(worker.status, 0, worker.stderr);
+    assert.deepEqual(mock.state.archives.map((request) => request.body), [
+      { provider: "codex", provider_thread_id: "T-worker-session", archived: true },
+    ]);
+  } finally {
+    await close(mock.server);
+  }
+});
+
+test("sync CLI starts archive reconciliation without waiting for archive HTTP", async () => {
+  const home = makeTempDir();
+  const codexRoot = join(home, "Codex");
+  const currentTranscript = join(codexRoot, "sessions", "2026", "07", "11", "rollout-current-session.jsonl");
+  const archivedPath = join(codexRoot, "archived_sessions", "rollout-background-session.jsonl");
+  mkdirSync(dirname(currentTranscript), { recursive: true });
+  mkdirSync(dirname(archivedPath), { recursive: true });
+  writeJsonl(currentTranscript, [
+    { type: "session_meta", payload: { id: "current-session", cwd: home } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "sync" }] } },
+  ]);
+  writeJsonl(archivedPath, [{ type: "session_meta", payload: { id: "background-session" } }]);
+
+  const mock = createMockJieliServer({ archiveDelayMs: 500 });
+  const baseUrl = await listen(mock.server);
+  try {
+    await withEnv({ HOME: home }, async () => {
+      runtime.writeSessionMapping(
+        "background-session",
+        baseUrl,
+        "T-background-session",
+        join(codexRoot, "sessions", "2026", "07", "10", "rollout-background-session.jsonl"),
+      );
+    });
+
+    const sync = await runNode([join(pluginRoot, "scripts", "sync.mjs"), "--trigger", "sessionstart", "--jieli-hook"], {
+      input: JSON.stringify({ transcript_path: currentTranscript, session_id: "current-session", cwd: home }),
+      env: { HOME: home, PATH: process.env.PATH, JIELI_API_KEY: "secret", JIELI_BASE_URL: baseUrl },
+    });
+    assert.equal(sync.status, 0, sync.stderr);
+
+    const deadline = Date.now() + 2000;
+    while (mock.state.archives.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(mock.state.archives.length, 1);
+    assert.equal(mock.state.archiveCompletions, 0);
+
+    while (mock.state.archiveCompletions === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(mock.state.archiveCompletions, 1);
+  } finally {
+    await close(mock.server);
+  }
+});
+
 test("sync CLI reports message quota exceeded only once per session on stop", async () => {
   const home = makeTempDir();
   const transcript = join(home, "sessions", "quota-session.jsonl");

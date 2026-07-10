@@ -32,6 +32,8 @@ export async function withEnv(values, fn) {
 export function createMockJieliServer(options = {}) {
   const state = {
     uploads: [],
+    archives: [],
+    archiveCompletions: 0,
     attachments: [],
     threadReads: [],
     searches: [],
@@ -50,6 +52,21 @@ export function createMockJieliServer(options = {}) {
         const upload = options.uploadResponse || { success: true };
         response.writeHead(options.uploadStatus || 200, { "content-type": "application/json" });
         response.end(typeof upload === "string" ? upload : JSON.stringify(upload));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/plugin/threads/archive") {
+        state.archives.push({ body: body ? JSON.parse(body) : null, headers, path: url.pathname });
+        const archive = options.archiveResponse || { success: true };
+        const archiveStatus = typeof options.archiveStatus === "function"
+          ? options.archiveStatus(state.archives[state.archives.length - 1], state.archives.length - 1)
+          : options.archiveStatus;
+        const finish = () => {
+          response.writeHead(archiveStatus || 200, { "content-type": "application/json" });
+          response.end(typeof archive === "string" ? archive : JSON.stringify(archive));
+          state.archiveCompletions += 1;
+        };
+        if (options.archiveDelayMs) setTimeout(finish, options.archiveDelayMs);
+        else finish();
         return;
       }
       if (request.method === "POST" && url.pathname === "/plugin/attachments") {
