@@ -251,6 +251,129 @@ test("builds Claude payload from JSONL while redacting secrets and preserving to
   assert.doesNotMatch(raw, /sk-ant-secret-value|abc\.def\.ghi|tool\.secret/);
 });
 
+test("renders Claude task notifications as tool calls in the thread timeline", async () => {
+  const tmp = makeTempDir();
+  const transcript = join(tmp, "session.jsonl");
+  writeJsonl(transcript, [
+    {
+      type: "user",
+      uuid: "task-event-message",
+      sessionId: "cc-task-notification",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "<task-notification>",
+              "<task-id>bh9by8bza</task-id>",
+              "<summary>Monitor event</summary>",
+              "<event>worker succeeded</event>",
+              "</task-notification>",
+            ].join("\n"),
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      uuid: "task-completed-message",
+      sessionId: "cc-task-notification",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "<task-notification>",
+              "<task-id>bh9by8bza</task-id>",
+              "<tool-use-id>call_wcWUW</tool-use-id>",
+              "<output-file>/tmp/task.output</output-file>",
+              "<status>completed</status>",
+              "<summary>Monitor stream ended</summary>",
+              "</task-notification>",
+            ].join("\n"),
+          },
+        ],
+      },
+    },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook(
+    { session_id: "cc-task-notification", transcript_path: transcript },
+    "https://jieli.example.test",
+  );
+
+  assert.deepEqual(payload.thread.messages, [
+    {
+      role: "assistant",
+      message_id: "task-event-message",
+      content: [
+        {
+          type: "tool_use",
+          id: "task-notification-task-event-message",
+          name: "TaskNotification",
+          input: {
+            task_id: "bh9by8bza",
+            summary: "Monitor event",
+            event: "worker succeeded",
+          },
+        },
+      ],
+    },
+    {
+      role: "assistant",
+      message_id: "task-completed-message",
+      content: [
+        {
+          type: "tool_use",
+          id: "task-notification-task-completed-message",
+          name: "TaskNotification",
+          input: {
+            task_id: "bh9by8bza",
+            tool_use_id: "call_wcWUW",
+            output_file: "/tmp/task.output",
+            status: "completed",
+            summary: "Monitor stream ended",
+          },
+        },
+      ],
+    },
+  ]);
+});
+
+test("keeps unsupported task notification shapes as ordinary text", async () => {
+  const tmp = makeTempDir();
+  const transcript = join(tmp, "session.jsonl");
+  const notification = [
+    "<task-notification>",
+    "<task-id>bh9by8bza</task-id>",
+    "<unknown-field>do not reinterpret</unknown-field>",
+    "</task-notification>",
+  ].join("\n");
+  writeJsonl(transcript, [
+    {
+      type: "user",
+      uuid: "unsupported-task-notification",
+      sessionId: "cc-task-notification-negative",
+      message: { role: "user", content: [{ type: "text", text: notification }] },
+    },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook(
+    { session_id: "cc-task-notification-negative", transcript_path: transcript },
+    "https://jieli.example.test",
+  );
+
+  assert.deepEqual(payload.thread.messages, [
+    {
+      role: "user",
+      message_id: "unsupported-task-notification",
+      content: notification,
+    },
+  ]);
+});
+
 test("uses Claude Code ai-title when it updates after thread creation", async () => {
   const tmp = makeTempDir();
   const transcript = join(tmp, "session.jsonl");

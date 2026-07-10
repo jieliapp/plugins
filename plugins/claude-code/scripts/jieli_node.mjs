@@ -538,6 +538,14 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
       }
     }
 
+    const sourceMessageId = message.id || "";
+    const messageId = entry.uuid || sourceMessageId || message.message_id || "";
+    const taskNotification = taskNotificationToolUse(content, messageId);
+    if (taskNotification) {
+      content = [taskNotification];
+      role = "assistant";
+    }
+
     const bash = role === "user" && typeof content === "string" ? parseBashBlock(content) : null;
     if (bash && bash.kind === "output" && pendingBashIndex !== null && pendingBashIndex === messages.length - 1) {
       messages[pendingBashIndex].content = renderBashTerminal(pendingBashCommand, bash.stdout, bash.stderr);
@@ -548,11 +556,10 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
         else if (bash.kind === "input_output") content = renderBashTerminal(bash.command, bash.stdout, bash.stderr);
         else content = renderBashTerminal(null, bash.stdout, bash.stderr);
       }
-      const sourceMessageId = message.id || "";
       const item = {
         role,
         content,
-        message_id: entry.uuid || sourceMessageId || message.message_id || "",
+        message_id: messageId,
       };
       if (message.usage && typeof message.usage === "object") item.usage = redactJson(message.usage);
       const protocolId = message.protocolMessageID || message.protocol_message_id;
@@ -755,6 +762,41 @@ function normalizeLocalCommandMessage(role, content) {
   if (text.startsWith("<command-message>")) return tagText(text, "command-name") || null;
   if (["<local-command-caveat>", "<command-name>", "<local-command-stdout>", "<local-command-stderr>"].some((prefix) => text.startsWith(prefix))) return null;
   return content;
+}
+
+function taskNotificationToolUse(content, messageId) {
+  if (typeof content !== "string") return null;
+  const match = /^<task-notification>\s*([\s\S]*?)\s*<\/task-notification>$/.exec(content.trim());
+  if (!match) return null;
+
+  const fields = new Map([
+    ["task-id", "task_id"],
+    ["tool-use-id", "tool_use_id"],
+    ["output-file", "output_file"],
+    ["status", "status"],
+    ["summary", "summary"],
+    ["event", "event"],
+  ]);
+  const input = {};
+  const childPattern = /<([a-z-]+)>([\s\S]*?)<\/\1>/g;
+  let offset = 0;
+  for (const child of match[1].matchAll(childPattern)) {
+    if (match[1].slice(offset, child.index).trim()) return null;
+    const key = fields.get(child[1]);
+    if (!key || Object.hasOwn(input, key)) return null;
+    const value = child[2].trim();
+    if (value) input[key] = value;
+    offset = child.index + child[0].length;
+  }
+  if (match[1].slice(offset).trim()) return null;
+  if (!input.task_id) return null;
+
+  return {
+    type: "tool_use",
+    id: `task-notification-${messageId || input.task_id}`,
+    name: "TaskNotification",
+    input,
+  };
 }
 
 function isLoadedSkillBodyMessage(role, content) {
