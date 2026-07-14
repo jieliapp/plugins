@@ -504,6 +504,7 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
   let updatedMs = 0;
   let pendingBashIndex = null;
   let pendingBashCommand = "";
+  const ignoredTaskToolUseIds = new Set();
   const lines = readFileSync(path, "utf8").split(/\r?\n/);
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -530,6 +531,8 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
     } else {
       content = await normalizeContent(message.content, imageUploader);
       if (content == null) continue;
+      content = filterTaskTranscriptContent(content, ignoredTaskToolUseIds);
+      if (content == null) continue;
       role = normalizedRole(message.role || entry.type, content);
       content = normalizeLocalCommandMessage(role, content);
       if (content == null || isLoadedSkillBodyMessage(role, content)) continue;
@@ -540,11 +543,6 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
 
     const sourceMessageId = message.id || "";
     const messageId = entry.uuid || sourceMessageId || message.message_id || "";
-    const taskNotification = taskNotificationToolUse(content, messageId);
-    if (taskNotification) {
-      content = [taskNotification];
-      role = "assistant";
-    }
 
     const bash = role === "user" && typeof content === "string" ? parseBashBlock(content) : null;
     if (bash && bash.kind === "output" && pendingBashIndex !== null && pendingBashIndex === messages.length - 1) {
@@ -764,39 +762,23 @@ function normalizeLocalCommandMessage(role, content) {
   return content;
 }
 
-function taskNotificationToolUse(content, messageId) {
-  if (typeof content !== "string") return null;
-  const match = /^<task-notification>\s*([\s\S]*?)\s*<\/task-notification>$/.exec(content.trim());
-  if (!match) return null;
-
-  const fields = new Map([
-    ["task-id", "task_id"],
-    ["tool-use-id", "tool_use_id"],
-    ["output-file", "output_file"],
-    ["status", "status"],
-    ["summary", "summary"],
-    ["event", "event"],
-  ]);
-  const input = {};
-  const childPattern = /<([a-z-]+)>([\s\S]*?)<\/\1>/g;
-  let offset = 0;
-  for (const child of match[1].matchAll(childPattern)) {
-    if (match[1].slice(offset, child.index).trim()) return null;
-    const key = fields.get(child[1]);
-    if (!key || Object.hasOwn(input, key)) return null;
-    const value = child[2].trim();
-    if (value) input[key] = value;
-    offset = child.index + child[0].length;
+function filterTaskTranscriptContent(content, ignoredToolUseIds) {
+  if (typeof content === "string") {
+    return /^<task-notification>[\s\S]*<\/task-notification>$/.test(content.trim()) ? null : content;
   }
-  if (match[1].slice(offset).trim()) return null;
-  if (!input.task_id) return null;
+  if (!Array.isArray(content)) return content;
 
-  return {
-    type: "tool_use",
-    id: `task-notification-${messageId || input.task_id}`,
-    name: "TaskNotification",
-    input,
-  };
+  const blocks = [];
+  for (const block of content) {
+    if (block?.type === "tool_use" && String(block.name || "").startsWith("Task")) {
+      if (block.id) ignoredToolUseIds.add(String(block.id));
+      continue;
+    }
+    if (block?.type === "tool_result" && ignoredToolUseIds.has(String(block.tool_use_id || ""))) continue;
+    blocks.push(block);
+  }
+  if (!blocks.length) return null;
+  return collapseTextOnlyBlocks(blocks);
 }
 
 function isLoadedSkillBodyMessage(role, content) {

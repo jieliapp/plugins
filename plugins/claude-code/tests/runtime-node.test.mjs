@@ -251,125 +251,66 @@ test("builds Claude payload from JSONL while redacting secrets and preserving to
   assert.doesNotMatch(raw, /sk-ant-secret-value|abc\.def\.ghi|tool\.secret/);
 });
 
-test("renders Claude task notifications as tool calls in the thread timeline", async () => {
+test("removes Claude Task tools, results, and notifications while preserving other content", async () => {
   const tmp = makeTempDir();
   const transcript = join(tmp, "session.jsonl");
   writeJsonl(transcript, [
     {
-      type: "user",
-      uuid: "task-event-message",
-      sessionId: "cc-task-notification",
+      type: "assistant",
+      uuid: "mixed-tools",
+      sessionId: "cc-task-filter",
       message: {
-        role: "user",
+        role: "assistant",
         content: [
-          {
-            type: "text",
-            text: [
-              "<task-notification>",
-              "<task-id>bh9by8bza</task-id>",
-              "<summary>Monitor event</summary>",
-              "<event>worker succeeded</event>",
-              "</task-notification>",
-            ].join("\n"),
-          },
+          { type: "text", text: "keep this explanation" },
+          { type: "tool_use", id: "task-output-1", name: "TaskOutput", input: { task_id: "a999985af67d0d7a2", block: true, timeout: 60000 } },
+          { type: "tool_use", id: "bash-1", name: "Bash", input: { command: "git status" } },
         ],
       },
     },
     {
       type: "user",
-      uuid: "task-completed-message",
-      sessionId: "cc-task-notification",
+      uuid: "mixed-results",
+      sessionId: "cc-task-filter",
       message: {
         role: "user",
         content: [
-          {
-            type: "text",
-            text: [
-              "<task-notification>",
-              "<task-id>bh9by8bza</task-id>",
-              "<tool-use-id>call_wcWUW</tool-use-id>",
-              "<output-file>/tmp/task.output</output-file>",
-              "<status>completed</status>",
-              "<summary>Monitor stream ended</summary>",
-              "</task-notification>",
-            ].join("\n"),
-          },
+          { type: "tool_result", tool_use_id: "task-output-1", content: "<status>running</status><output>internal transcript</output>" },
+          { type: "tool_result", tool_use_id: "bash-1", content: "clean" },
         ],
+      },
+    },
+    {
+      type: "user",
+      uuid: "task-notification",
+      sessionId: "cc-task-filter",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "<task-notification><task-id>a999985af67d0d7a2</task-id><status>completed</status></task-notification>" }],
       },
     },
   ]);
 
   const payload = await runtime.buildPayloadFromHook(
-    { session_id: "cc-task-notification", transcript_path: transcript },
+    { session_id: "cc-task-filter", transcript_path: transcript },
     "https://jieli.example.test",
   );
 
   assert.deepEqual(payload.thread.messages, [
     {
       role: "assistant",
-      message_id: "task-event-message",
+      message_id: "mixed-tools",
       content: [
-        {
-          type: "tool_use",
-          id: "task-notification-task-event-message",
-          name: "TaskNotification",
-          input: {
-            task_id: "bh9by8bza",
-            summary: "Monitor event",
-            event: "worker succeeded",
-          },
-        },
+        { type: "text", text: "keep this explanation" },
+        { type: "tool_use", id: "bash-1", name: "Bash", input: { command: "git status" } },
       ],
     },
     {
-      role: "assistant",
-      message_id: "task-completed-message",
+      role: "tool",
+      message_id: "mixed-results",
       content: [
-        {
-          type: "tool_use",
-          id: "task-notification-task-completed-message",
-          name: "TaskNotification",
-          input: {
-            task_id: "bh9by8bza",
-            tool_use_id: "call_wcWUW",
-            output_file: "/tmp/task.output",
-            status: "completed",
-            summary: "Monitor stream ended",
-          },
-        },
+        { type: "tool_result", tool_use_id: "bash-1", content: "", run: { status: "completed", result: { output: "clean" } } },
       ],
-    },
-  ]);
-});
-
-test("keeps unsupported task notification shapes as ordinary text", async () => {
-  const tmp = makeTempDir();
-  const transcript = join(tmp, "session.jsonl");
-  const notification = [
-    "<task-notification>",
-    "<task-id>bh9by8bza</task-id>",
-    "<unknown-field>do not reinterpret</unknown-field>",
-    "</task-notification>",
-  ].join("\n");
-  writeJsonl(transcript, [
-    {
-      type: "user",
-      uuid: "unsupported-task-notification",
-      sessionId: "cc-task-notification-negative",
-      message: { role: "user", content: [{ type: "text", text: notification }] },
-    },
-  ]);
-
-  const payload = await runtime.buildPayloadFromHook(
-    { session_id: "cc-task-notification-negative", transcript_path: transcript },
-    "https://jieli.example.test",
-  );
-
-  assert.deepEqual(payload.thread.messages, [
-    {
-      role: "user",
-      message_id: "unsupported-task-notification",
-      content: notification,
     },
   ]);
 });
