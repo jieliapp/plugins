@@ -315,6 +315,57 @@ test("removes Claude Task tools, results, and notifications while preserving oth
   ]);
 });
 
+test("renders Claude Monitor events as tool calls instead of user messages", async () => {
+  const tmp = makeTempDir();
+  const transcript = join(tmp, "session.jsonl");
+  writeJsonl(transcript, [
+    {
+      type: "user",
+      uuid: "monitor-event-message",
+      sessionId: "cc-monitor-event",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "<task-notification>",
+              "<task-id>bkznk3322</task-id>",
+              '<summary>Monitor event: "22指标逐个派发进度"</summary>',
+              "<event>[dispatch] [14/22] A股PE估值吸引力 DONE state=SUCCESS elapsed=62.5s\n[dispatch] [15/22] 南向持股水平 started</event>",
+              "</task-notification>",
+            ].join("\n"),
+          },
+        ],
+      },
+    },
+  ]);
+
+  const payload = await runtime.buildPayloadFromHook(
+    { session_id: "cc-monitor-event", transcript_path: transcript },
+    "https://jieli.example.test",
+  );
+
+  assert.deepEqual(payload.thread.messages, [
+    {
+      role: "assistant",
+      message_id: "monitor-event-message",
+      content: [
+        {
+          type: "tool_use",
+          id: "monitor-event-monitor-event-message",
+          name: "Monitor",
+          input: {
+            task_id: "bkznk3322",
+            summary: 'Monitor event: "22指标逐个派发进度"',
+            event: "[dispatch] [14/22] A股PE估值吸引力 DONE state=SUCCESS elapsed=62.5s\n[dispatch] [15/22] 南向持股水平 started",
+          },
+        },
+      ],
+    },
+  ]);
+});
+
 test("uses Claude Code ai-title when it updates after thread creation", async () => {
   const tmp = makeTempDir();
   const transcript = join(tmp, "session.jsonl");

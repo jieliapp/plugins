@@ -531,9 +531,10 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
     } else {
       content = await normalizeContent(message.content, imageUploader);
       if (content == null) continue;
-      content = filterTaskTranscriptContent(content, ignoredTaskToolUseIds);
+      content = filterTaskTranscriptContent(content, ignoredTaskToolUseIds, entry.uuid || message.id || message.message_id || "");
       if (content == null) continue;
       role = normalizedRole(message.role || entry.type, content);
+      if (Array.isArray(content) && content.every((block) => block?.type === "tool_use" && block.name === "Monitor")) role = "assistant";
       content = normalizeLocalCommandMessage(role, content);
       if (content == null || isLoadedSkillBodyMessage(role, content)) continue;
       if (role === "user" && isAutoCompactionSummaryText(textFromNormalizedContent(content))) {
@@ -762,8 +763,41 @@ function normalizeLocalCommandMessage(role, content) {
   return content;
 }
 
-function filterTaskTranscriptContent(content, ignoredToolUseIds) {
+function monitorEventToolUse(content, messageId) {
+  if (typeof content !== "string") return null;
+  const match = /^<task-notification>\s*([\s\S]*?)\s*<\/task-notification>$/.exec(content.trim());
+  if (!match) return null;
+
+  const fields = new Map([
+    ["task-id", "task_id"],
+    ["summary", "summary"],
+    ["event", "event"],
+  ]);
+  const input = {};
+  const childPattern = /<([a-z-]+)>([\s\S]*?)<\/\1>/g;
+  let offset = 0;
+  for (const child of match[1].matchAll(childPattern)) {
+    if (match[1].slice(offset, child.index).trim()) return null;
+    const key = fields.get(child[1]);
+    if (!key || Object.hasOwn(input, key)) return null;
+    const value = child[2].trim();
+    if (value) input[key] = value;
+    offset = child.index + child[0].length;
+  }
+  if (match[1].slice(offset).trim() || !input.task_id || !input.event) return null;
+
+  return {
+    type: "tool_use",
+    id: `monitor-event-${messageId || input.task_id}`,
+    name: "Monitor",
+    input,
+  };
+}
+
+function filterTaskTranscriptContent(content, ignoredToolUseIds, messageId = "") {
   if (typeof content === "string") {
+    const monitorEvent = monitorEventToolUse(content, messageId);
+    if (monitorEvent) return [monitorEvent];
     return /^<task-notification>[\s\S]*<\/task-notification>$/.test(content.trim()) ? null : content;
   }
   if (!Array.isArray(content)) return content;
