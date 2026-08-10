@@ -639,7 +639,7 @@ test("handles Claude model aliases, local command noise, loaded skills, and spli
   assert.doesNotMatch(raw, /Base directory|large-signature|<local-command-caveat>/);
 });
 
-test("replaces compaction summaries and renders Claude bash transcript tags", async () => {
+test("renders compaction summaries as tool calls and renders Claude bash transcript tags", async () => {
   const tmp = makeTempDir();
   const fakeKey = `jieli_${"a".repeat(30)}`;
   const prose = "我用 `!rm -rf x` 执行了：<bash-input>rm -rf x</bash-input><bash-stdout>(Bash completed with no output)</bash-stdout> 你看下";
@@ -662,8 +662,30 @@ test("replaces compaction summaries and renders Claude bash transcript tags", as
 
   const payload = await runtime.buildPayloadFromHook({ session_id: "cc-bash", transcript_path: transcript }, "https://jieli.example.test");
   assert.equal(payload.thread.title, "原始第一条消息");
-  assert.equal(payload.thread.messages[1].content, runtime.COMPACTION_PLACEHOLDER);
-  assert.equal(payload.thread.messages[2].content, runtime.COMPACTION_PLACEHOLDER);
+  assert.deepEqual(payload.thread.messages[1], {
+    role: "assistant",
+    message_id: "u-compact",
+    content: [
+      {
+        type: "tool_use",
+        id: "compact-u-compact",
+        name: "Compact",
+        input: { summary: "[Context automatically compacted]" },
+      },
+    ],
+  });
+  assert.deepEqual(payload.thread.messages[2], {
+    role: "assistant",
+    message_id: "u-compact-text",
+    content: [
+      {
+        type: "tool_use",
+        id: "compact-u-compact-text",
+        name: "Compact",
+        input: { summary: "[Context automatically compacted]" },
+      },
+    ],
+  });
   assert.equal(runtime.COMPACTION_PLACEHOLDER, "[Context automatically compacted]");
   assert.equal(payload.thread.messages[3].content, "```console\n$ echo $JIELI_API_KEY\n[REDACTED:jieli-api-key]\n```");
   assert.equal(payload.thread.messages[4].content, "```console\n$ rm -rf /tmp/x\n# (no output)\n```");

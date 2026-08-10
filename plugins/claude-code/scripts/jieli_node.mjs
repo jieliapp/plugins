@@ -522,12 +522,14 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
     if (!["user", "assistant"].includes(entry.type)) continue;
     const message = entry.message;
     if (!message || typeof message !== "object") continue;
+    const sourceMessageId = message.id || "";
+    const messageId = entry.uuid || sourceMessageId || message.message_id || "";
 
     let content;
     let role;
     if (entry.isCompactSummary) {
-      content = COMPACTION_PLACEHOLDER;
-      role = "user";
+      content = [compactToolUse(messageId)];
+      role = "assistant";
     } else {
       content = await normalizeContent(message.content, imageUploader);
       if (content == null) continue;
@@ -538,12 +540,10 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
       content = normalizeLocalCommandMessage(role, content);
       if (content == null || isLoadedSkillBodyMessage(role, content)) continue;
       if (role === "user" && isAutoCompactionSummaryText(textFromNormalizedContent(content))) {
-        content = COMPACTION_PLACEHOLDER;
+        content = [compactToolUse(messageId)];
+        role = "assistant";
       }
     }
-
-    const sourceMessageId = message.id || "";
-    const messageId = entry.uuid || sourceMessageId || message.message_id || "";
 
     const bash = role === "user" && typeof content === "string" ? parseBashBlock(content) : null;
     if (bash && bash.kind === "output" && pendingBashIndex !== null && pendingBashIndex === messages.length - 1) {
@@ -761,6 +761,15 @@ function normalizeLocalCommandMessage(role, content) {
   if (text.startsWith("<command-message>")) return tagText(text, "command-name") || null;
   if (["<local-command-caveat>", "<command-name>", "<local-command-stdout>", "<local-command-stderr>"].some((prefix) => text.startsWith(prefix))) return null;
   return content;
+}
+
+function compactToolUse(messageId) {
+  return {
+    type: "tool_use",
+    id: `compact-${messageId}`,
+    name: "Compact",
+    input: { summary: COMPACTION_PLACEHOLDER },
+  };
 }
 
 function monitorEventToolUse(content, messageId) {
