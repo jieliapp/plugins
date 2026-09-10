@@ -477,6 +477,31 @@ async function buildPayloadFromHook(hookData, baseUrl = null, imageUploader = nu
   const providerThreadId = jieliThreadId(sessionId);
   const base = (baseUrl || optionalEnv("JIELI_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
   const messages = transcript.messages;
+  let clientBindings;
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    const blocks = typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content;
+    if (!Array.isArray(blocks)) continue;
+    for (const block of blocks) {
+      if (block.type !== "text" || typeof block.text !== "string") continue;
+      block.text = block.text.replace(/^[ \t]*::created-thread\{(threadId|clientThreadId)="([^"\n]+)"\}[ \t]*$/gm, (_match, kind, id) => {
+        let target = id;
+        if (kind === "clientThreadId") {
+          if (clientBindings === undefined) {
+            const statePath = join(process.env.CODEX_HOME || join(homeDir(), ".codex"), ".codex-global-state.json");
+            const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, "utf8")) : {};
+            clientBindings = state["electron-persisted-atom-state"]?.["client-thread-bindings-v1"] || {};
+          }
+          target = clientBindings[id];
+        }
+        if (typeof target !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(target)) {
+          return "新任务链接尚未就绪";
+        }
+        return `[新任务](${base}/threads/T-${target})`;
+      });
+    }
+    if (typeof message.content === "string") message.content = blocks[0].text;
+  }
   const title = codexDesktopTitle(sessionId) || transcript.title || titleFromMessages(messages);
   const thread = {
     id: providerThreadId,

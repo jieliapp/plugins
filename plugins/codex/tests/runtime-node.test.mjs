@@ -325,6 +325,54 @@ test("filters Codex subagent notifications after wait_agent returns", async () =
   assert.doesNotMatch(raw, /subagent_notification|name":"subagent"|role":"user","content":"只读审查/);
 });
 
+test("uploads created-thread directives as Jieli links using desktop client bindings", async () => {
+  const tmp = makeTempDir();
+  const transcript = join(tmp, "session.jsonl");
+  const clientId = "client-new-thread:c9c570ee-26f0-4d31-91d3-d6705cd40fa8";
+  const threadId = "01a089c0-eea6-77b1-ab72-e7482ec9611f";
+  writeFileSync(join(tmp, ".codex-global-state.json"), JSON.stringify({
+    "electron-persisted-atom-state": { "client-thread-bindings-v1": { [clientId]: threadId } },
+  }));
+  writeJsonl(transcript, [
+    { type: "session_meta", payload: { id: "created-links" } },
+    { type: "response_item", payload: { type: "message", role: "assistant", content: [
+      { type: "output_text", text: `已创建。\n\n::created-thread{clientThreadId="${clientId}"}` },
+    ] } },
+    { type: "response_item", payload: { type: "message", role: "assistant", content: `::created-thread{threadId="${threadId}"}` } },
+  ]);
+  await withEnv({ CODEX_HOME: tmp }, async () => {
+    const payload = await runtime.buildPayloadFromHook({ transcript_path: transcript }, "https://jieli.example.test/");
+    assert.equal(payload.thread.messages[0].content, "已创建。\n\n[新任务](https://jieli.example.test/threads/T-01a089c0-eea6-77b1-ab72-e7482ec9611f)");
+    assert.equal(payload.thread.messages[1].content, "[新任务](https://jieli.example.test/threads/T-01a089c0-eea6-77b1-ab72-e7482ec9611f)");
+  });
+});
+
+test("reports pending created-thread links and resolves them on a later upload without rewriting user or tool text", async () => {
+  const tmp = makeTempDir();
+  const transcript = join(tmp, "session.jsonl");
+  const clientId = "client-new-thread:c9c570ee-26f0-4d31-91d3-d6705cd40fa8";
+  const directive = `::created-thread{clientThreadId="${clientId}"}`;
+  writeJsonl(transcript, [
+    { type: "session_meta", payload: { id: "pending-links" } },
+    { type: "response_item", payload: { type: "message", role: "user", content: directive } },
+    { type: "response_item", payload: { type: "message", role: "assistant", content: directive } },
+    { type: "response_item", payload: { type: "function_call_output", call_id: "tool-1", output: directive } },
+  ]);
+  await withEnv({ CODEX_HOME: tmp }, async () => {
+    const pending = await runtime.buildPayloadFromHook({ transcript_path: transcript });
+    assert.equal(pending.thread.messages[0].content, directive);
+    assert.equal(pending.thread.messages[1].content, "新任务链接尚未就绪");
+    assert.match(JSON.stringify(pending.thread.messages[2]), /::created-thread/);
+    writeFileSync(join(tmp, ".codex-global-state.json"), JSON.stringify({
+      "electron-persisted-atom-state": { "client-thread-bindings-v1": {
+        [clientId]: "01a089c0-eea6-77b1-ab72-e7482ec9611f",
+      } },
+    }));
+    const ready = await runtime.buildPayloadFromHook({ transcript_path: transcript }, "https://jieli.app");
+    assert.equal(ready.thread.messages[1].content, "[新任务](https://jieli.app/threads/T-01a089c0-eea6-77b1-ab72-e7482ec9611f)");
+  });
+});
+
 test("filters Codex handoff summaries, git directives, internal context, loaded instructions, and file mention prefixes", async () => {
   const tmp = makeTempDir();
   const longSummary = "**Handoff Summary**\n\n**Current task**\n" + "do not upload this summary\n".repeat(20);
