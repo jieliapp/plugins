@@ -207,6 +207,72 @@ test("Codex transcript session id wins over hook session id and can be found fro
   });
 });
 
+test("sync follows paginated revert history across dates and excludes reverted tails", async () => {
+  const tmp = makeTempDir();
+  const sessions = join(tmp, "sessions");
+  const paths = ["15", "16", "17"].map((day, index) => {
+    const dir = join(sessions, "2026", "09", day);
+    mkdirSync(dir, { recursive: true });
+    return join(dir, `rollout-2026-09-${day}T12-00-00-stable${index ? `_segment-${index}` : ""}.jsonl`);
+  });
+  let base;
+  let ordinal = 0;
+  for (let index = 0; index < paths.length; index += 1) {
+    const entries = [
+      { type: "session_meta", timestamp: `2026-09-${15 + index}T04:00:00.000Z`, payload: {
+        id: "stable", history_mode: "paginated", ...(base ? { history_base: base } : {}),
+      } },
+      { type: "response_item", payload: { type: "message", role: "user", content: `保留第 ${index + 1} 段` } },
+    ];
+    writeJsonl(paths[index], entries);
+    ordinal += entries.length;
+    base = { thread_id: index ? `segment-${index}` : "stable", end_byte_offset: statSync(paths[index]).size, end_ordinal_exclusive: ordinal };
+    if (index < 2) writeJsonl(paths[index], [...entries,
+      { type: "response_item", payload: { type: "message", role: "user", content: "已回退，不应同步" } },
+    ]);
+  }
+  // An unreferenced sibling is not part of the active history.
+  writeJsonl(join(dirname(paths[2]), "rollout-other-stable_unrelated.jsonl"), [
+    { type: "session_meta", payload: { id: "stable" } },
+    { type: "response_item", payload: { type: "message", role: "user", content: "unrelated" } },
+  ]);
+  await withEnv({ HOME: tmp, CODEX_HOME: tmp }, async () => {
+    const payload = await runtime.buildPayloadFromHook({ transcript_path: paths[2], session_id: "segment-2" });
+    assert.equal(payload.thread.id, "T-stable");
+    assert.deepEqual(payload.thread.messages.map((message) => message.content), ["保留第 1 段", "保留第 2 段", "保留第 3 段"]);
+    assert.equal(new Set(payload.thread.messages.map((message) => message.message_id)).size, 3);
+    assert.equal(payload.thread.created_ms, Date.parse("2026-09-15T04:00:00.000Z"));
+    assert.equal(payload.thread.updated_ms, Date.parse("2026-09-17T04:00:00.000Z"));
+  });
+});
+
+test("sync rejects missing, cyclic, and invalid paginated history instead of uploading a partial thread", async () => {
+  const tmp = makeTempDir();
+  const dir = join(tmp, "sessions", "2026", "09", "17");
+  mkdirSync(dir, { recursive: true });
+  const parent = join(dir, "rollout-parent.jsonl");
+  const current = join(dir, "rollout-current.jsonl");
+  writeJsonl(parent, [
+    { type: "session_meta", payload: { id: "stable" } },
+    { type: "response_item", payload: { type: "message", role: "user", content: "保留" } },
+  ]);
+  const size = statSync(parent).size;
+  const cases = [
+    [{ thread_id: "missing", end_byte_offset: size, end_ordinal_exclusive: 2 }, /found 0/],
+    [{ thread_id: "parent", end_byte_offset: size + 1, end_ordinal_exclusive: 2 }, /byte boundary/],
+    [{ thread_id: "parent", end_byte_offset: size - 2, end_ordinal_exclusive: 2 }, /byte boundary/],
+    [{ thread_id: "parent", end_byte_offset: size, end_ordinal_exclusive: 3 }, /ordinal boundary/],
+    [{ thread_id: "current", end_byte_offset: 0, end_ordinal_exclusive: 0 }, /Cyclic/],
+  ];
+  for (const [historyBase, error] of cases) {
+    writeJsonl(current, [
+      { type: "session_meta", payload: { id: "stable", history_base: historyBase } },
+      { type: "response_item", payload: { type: "message", role: "user", content: "latest" } },
+    ]);
+    await assert.rejects(runtime.buildPayloadFromHook({ transcript_path: current }), error);
+  }
+});
+
 test("normalizes Codex apply_patch, exec_command, and nonzero tool exits", async () => {
   const tmp = makeTempDir();
   const patchText = "*** Begin Patch\n*** Update File: route_test.go\n@@\n-old\n+new\n*** End Patch\n";

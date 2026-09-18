@@ -7,6 +7,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -550,7 +551,7 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
   let title = "";
   let createdMs = 0;
   let updatedMs = 0;
-  const lines = readFileSync(path, "utf8").split(/\r?\n/);
+  const lines = readTranscriptLines(path);
   let lineNumber = 0;
   for (const line of lines) {
     lineNumber += 1;
@@ -569,10 +570,10 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
       updatedMs = stampMs;
     }
     if (entry.type === "session_meta") {
-      sessionId = sessionId || String(payload.id || "");
-      cwd = cwd || String(payload.cwd || "");
+      sessionId = String(payload.id || sessionId);
+      cwd = String(payload.cwd || cwd);
       const git = payload.git && typeof payload.git === "object" ? payload.git : {};
-      branch = branch || String(git.branch || "");
+      branch = String(git.branch || branch);
       continue;
     }
     if (entry.type === "turn_context") {
@@ -605,6 +606,52 @@ async function parseTranscript(path, fallbackSessionId = "", imageUploader = nul
     messages.push(item);
   }
   return { id: sessionId || fallbackSessionId, cwd, branch, model, title, created_ms: createdMs, updated_ms: updatedMs || createdMs, messages };
+}
+
+// Reverts retain a byte-bounded prefix of a previous physical rollout, not
+// every file sharing the logical session id. Line ordinals span that chain.
+function readTranscriptLines(path, endByteOffset = null, history = { seen: new Set(), paths: null }) {
+  const canonicalPath = realpathSync(path);
+  if (history.seen.has(canonicalPath)) throw new Error("Cyclic Codex history_base reference");
+  history.seen.add(canonicalPath);
+  const bytes = readFileSync(path);
+  if (endByteOffset !== null && (!Number.isSafeInteger(endByteOffset) || endByteOffset < 0 || endByteOffset > bytes.length ||
+      (endByteOffset > 0 && bytes[endByteOffset - 1] !== 10))) {
+    throw new Error(`Invalid Codex history_base byte boundary: ${endByteOffset}`);
+  }
+  const lines = bytes.subarray(0, endByteOffset ?? bytes.length).toString("utf8").split(/\r?\n/);
+  if (lines.at(-1) === "") lines.pop();
+  let meta;
+  try { meta = JSON.parse(lines[0]); } catch { /* The parser skips incomplete JSONL records. */ }
+  const base = meta?.type === "session_meta" ? meta.payload?.history_base : null;
+  if (base == null) return lines;
+  if (typeof base.thread_id !== "string" || !base.thread_id || !Number.isSafeInteger(base.end_byte_offset) ||
+      !Number.isSafeInteger(base.end_ordinal_exclusive) || base.end_ordinal_exclusive < 0) {
+    throw new Error("Invalid Codex history_base reference");
+  }
+  if (history.paths === null) {
+    let root = dirname(canonicalPath);
+    while (!["sessions", "archived_sessions"].includes(basename(root)) && dirname(root) !== root) root = dirname(root);
+    if (dirname(root) === root) throw new Error("Codex history_base rollout must be inside sessions or archived_sessions");
+    history.paths = [];
+    const stack = [root];
+    while (stack.length) {
+      const dir = stack.pop();
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const candidate = join(dir, entry.name);
+        if (entry.isDirectory()) stack.push(candidate);
+        else if (entry.isFile() && entry.name.endsWith(".jsonl")) history.paths.push(candidate);
+      }
+    }
+  }
+  const matches = history.paths.filter((candidate) => {
+    const name = basename(candidate);
+    return name.endsWith(`-${base.thread_id}.jsonl`) || name.endsWith(`_${base.thread_id}.jsonl`);
+  });
+  if (matches.length !== 1) throw new Error(`Expected one Codex history_base rollout for ${base.thread_id}, found ${matches.length}`);
+  const prefix = readTranscriptLines(matches[0], base.end_byte_offset, history);
+  if (prefix.length !== base.end_ordinal_exclusive) throw new Error(`Invalid Codex history_base ordinal boundary for ${base.thread_id}`);
+  return prefix.concat(lines);
 }
 
 function resolveTranscriptPath(hookData) {
