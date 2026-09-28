@@ -37,7 +37,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(Bash|Shell|shell_command|exec_command)$",
+        "matcher": "^(Bash|Shell|shell_command|exec_command|local_shell|command_execution|tools\\.exec_command|functions\\.exec)$",
         "hooks": [
           {
             "type": "command",

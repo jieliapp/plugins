@@ -34,7 +34,16 @@ const SETTINGS_FILE_NAME = "settings.json";
 const TRAILER_KEY = "Jieli-Thread";
 const HANDOFF_CONTEXT_ENV = "JIELI_HANDOFF_CONTEXT_B64";
 const AMBIGUOUS_TOKENS = ["||", ";", "\n", "$(", "`", "<<", "|"];
-const SHELL_TOOL_NAMES = new Set(["Bash", "Shell", "shell_command", "exec_command"]);
+const SHELL_TOOL_NAMES = new Set([
+  "Bash",
+  "Shell",
+  "shell_command",
+  "exec_command",
+  "local_shell",
+  "command_execution",
+  "tools.exec_command",
+  "functions.exec",
+]);
 const CONFIG_BASE_URL_ENV_NAMES = ["JIELI_BASE_URL"];
 const CONFIG_API_KEY_ENV_NAMES = ["JIELI_API_KEY"];
 const HELPER_COMMANDS = {
@@ -1598,7 +1607,9 @@ function normalizeShellHook(hookData, allowedTools = SHELL_TOOL_NAMES) {
 }
 
 function buildUpdatedHookInput(shell, updatedCommand) {
-  return { [shell.commandKey || "command"]: updatedCommand };
+  // Codex validates PreToolUse rewrites against the canonical `command` field,
+  // even when the incoming hook payload uses the `cmd` alias.
+  return { command: updatedCommand };
 }
 
 function updatedCommitCommand(command, sessionId) {

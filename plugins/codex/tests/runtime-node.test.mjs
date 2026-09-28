@@ -73,10 +73,10 @@ test("helper command runtime contract is stable across OS shells", async () => {
 });
 
 test("shell hook contract normalizes macOS and Windows command inputs", () => {
-  const codexMac = runtime.normalizeShellHook({ session_id: "codex-mac", transcript_path: "/tmp/a.jsonl", cwd: "/repo", tool_name: "exec_command", tool_input: { cmd: "git status" } });
+  const codexMac = runtime.normalizeShellHook({ session_id: "codex-mac", transcript_path: "/tmp/a.jsonl", cwd: "/repo", tool_name: "tools.exec_command", tool_input: { cmd: "git status" } });
   assert.equal(codexMac.commandKey, "cmd");
   assert.equal(codexMac.command, "git status");
-  assert.deepEqual(runtime.buildUpdatedHookInput(codexMac, "node helper"), { cmd: "node helper" });
+  assert.deepEqual(runtime.buildUpdatedHookInput(codexMac, "node helper"), { command: "node helper" });
 
   const codexWindows = runtime.normalizeShellHook({ session_id: "codex-win", session_path: "C:\\Users\\Administrator\\.codex\\sessions\\rollout.jsonl", cwd: "C:\\repo", tool_name: "Shell", tool_input: { command: "git status" } });
   assert.equal(codexWindows.commandKey, "command");
@@ -1153,6 +1153,12 @@ test("handoff info and commit trailer helpers support Codex shell aliases and No
       response.hookSpecificOutput.updatedInput.command,
       'git status --short && git add plugins/codex/scripts/commit_trailer.mjs && git commit -m "fix: add codex thread trailers" --trailer "Jieli-Thread: https://jieli.example.test/threads/T-codex-chain" -- plugins/codex/scripts/commit_trailer.mjs',
     );
+    const cmdResponse = runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "tools.exec_command", tool_input: { cmd: 'git commit -m "ship"' } });
+    assert.equal(
+      cmdResponse.hookSpecificOutput.updatedInput.command,
+      'git commit -m "ship" --trailer "Jieli-Thread: https://jieli.example.test/threads/T-codex-chain"',
+    );
+    assert.equal("cmd" in cmdResponse.hookSpecificOutput.updatedInput, false);
     assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "ship" | cat' } }), {});
     assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "ship" --trailer Jieli-Thread:old' } }), {});
   });
@@ -1225,7 +1231,7 @@ test("plugin helpers, docs, manifests, and hooks describe the split Jieli tools"
 
   const hooks = JSON.parse(readFileSync(join(pluginRoot, "hooks", "hooks.json"), "utf8"));
   assert.equal("UserPromptSubmit" in hooks.hooks, false);
-  assert.equal(hooks.hooks.PreToolUse[0].matcher, "^(Bash|Shell|shell_command|exec_command)$");
+  assert.equal(hooks.hooks.PreToolUse[0].matcher, "^(Bash|Shell|shell_command|exec_command|local_shell|command_execution|tools\\.exec_command|functions\\.exec)$");
   const commands = Object.values(hooks.hooks).flatMap((configs) => configs.flatMap((config) => (config.hooks || []).map((hook) => hook.command)));
   assert.ok(commands.length > 0);
   for (const command of commands) {
