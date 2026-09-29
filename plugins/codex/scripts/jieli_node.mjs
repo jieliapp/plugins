@@ -41,6 +41,7 @@ const SHELL_TOOL_NAMES = new Set([
   "exec_command",
   "local_shell",
   "command_execution",
+  "CommandExecution",
   "tools.exec_command",
   "functions.exec",
 ]);
