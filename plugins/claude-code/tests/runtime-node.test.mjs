@@ -958,6 +958,12 @@ test("handoff info and commit trailer helpers inject Node-based context and trai
       response.hookSpecificOutput.updatedInput.command,
       'git status --short && git add file.txt && git commit -m "ship" --trailer "Jieli-Thread: https://jieli.example.test/threads/T-cc-chain" -- docs/test.md',
     );
+    const chainedCommit = 'git add src/library/qw_snapshot.py tests/test_qw_indicator_snapshot.py && git diff --cached --check && git diff --cached --stat && git commit -m "fix(qw): log empty snapshot columns"';
+    const chainedResponse = runtime.buildHookResponse({ session_id: "cc-chain", tool_name: "Bash", tool_input: { command: chainedCommit } });
+    assert.equal(
+      chainedResponse.hookSpecificOutput.updatedInput.command,
+      'git add src/library/qw_snapshot.py tests/test_qw_indicator_snapshot.py && git diff --cached --check && git diff --cached --stat && git commit -m "fix(qw): log empty snapshot columns" --trailer "Jieli-Thread: https://jieli.example.test/threads/T-cc-chain"',
+    );
     assert.deepEqual(runtime.buildHookResponse({ session_id: "cc-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "x" | git status' } }), {});
   });
 
