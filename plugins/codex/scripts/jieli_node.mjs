@@ -33,7 +33,7 @@ const TOOL_OUTPUT_MAX_CHARS = 20000;
 const SETTINGS_FILE_NAME = "settings.json";
 const TRAILER_KEY = "Jieli-Thread";
 const HANDOFF_CONTEXT_ENV = "JIELI_HANDOFF_CONTEXT_B64";
-const AMBIGUOUS_TOKENS = ["||", ";", "\n", "$(", "`", "<<", "|"];
+const AMBIGUOUS_TOKENS = ["||", ";", "$(", "`", "|"];
 const SHELL_TOOL_NAMES = new Set([
   "Bash",
   "Shell",
@@ -1615,7 +1615,7 @@ function buildUpdatedHookInput(shell, updatedCommand) {
 
 function updatedCommitCommand(command, sessionId) {
   if (!commitTrailerEnabled()) return "";
-  if (!command || !sessionId || AMBIGUOUS_TOKENS.some((token) => command.includes(token))) return "";
+  if (!command || !sessionId) return "";
   const mapping = readJson(join(homeDir(), ".jieli", SESSION_MAPPING_FILE), {});
   const session = mapping[sessionId];
   if (!session || typeof session !== "object") return "";
@@ -1626,8 +1626,28 @@ function updatedCommitCommand(command, sessionId) {
 }
 
 function injectTrailer(command, trailer) {
+  const scriptParts = splitTopLevelScript(command);
+  if (!scriptParts) return "";
+  const updatedParts = [];
+  let count = 0;
+  for (const scriptPart of scriptParts) {
+    if (!scriptPart.parse) {
+      updatedParts.push(scriptPart.text, scriptPart.separator);
+      continue;
+    }
+    const rewritten = rewriteCommitChain(scriptPart.text, trailer);
+    if (!rewritten) return "";
+    count += rewritten.count;
+    if (count > 1) return "";
+    updatedParts.push(rewritten.command, scriptPart.separator);
+  }
+  return count === 1 ? updatedParts.join("") : "";
+}
+
+function rewriteCommitChain(command, trailer) {
+  if (AMBIGUOUS_TOKENS.some((token) => command.includes(token))) return null;
   const parts = splitTopLevelAndChain(command);
-  if (!parts.length) return "";
+  if (!parts.length) return null;
   const updatedParts = [];
   let count = 0;
   for (const part of parts) {
@@ -1638,13 +1658,163 @@ function injectTrailer(command, trailer) {
     const updated = appendTrailerToCommitSegment(part, trailer);
     if (updated) {
       count += 1;
-      if (count > 1) return "";
+      if (count > 1) return null;
       updatedParts.push(updated);
     } else {
       updatedParts.push(part);
     }
   }
-  return count === 1 ? updatedParts.join("") : "";
+  return { command: updatedParts.join(""), count };
+}
+
+function splitTopLevelScript(command) {
+  const parts = [];
+  let segmentStart = 0;
+  let lineStart = 0;
+  let quote = "";
+  let escaped = false;
+  let heredocs = [];
+
+  while (lineStart < command.length) {
+    const newlineIndex = command.indexOf("\n", lineStart);
+    const hasNewline = newlineIndex >= 0;
+    const rawLineEnd = hasNewline ? newlineIndex : command.length;
+    const lineEnd = rawLineEnd > lineStart && command[rawLineEnd - 1] === "\r" ? rawLineEnd - 1 : rawLineEnd;
+    const line = command.slice(lineStart, lineEnd);
+    const separator = hasNewline ? command.slice(lineEnd, newlineIndex + 1) : "";
+    let closedHeredoc = false;
+
+    if (heredocs.length) {
+      if (isHeredocTerminator(line, heredocs[0])) heredocs.shift();
+      if (!heredocs.length) {
+        closedHeredoc = true;
+        parts.push({
+          text: command.slice(segmentStart, lineEnd),
+          parse: false,
+          separator,
+        });
+        segmentStart = hasNewline ? newlineIndex + 1 : command.length;
+      } else if (!hasNewline) {
+        return null;
+      }
+    } else {
+      const scanned = scanShellLine(line, quote, escaped);
+      if (!scanned) return null;
+      quote = scanned.quote;
+      escaped = scanned.escaped;
+      if (scanned.heredocs.length) {
+        heredocs = scanned.heredocs;
+        if (!hasNewline || quote || escaped) return null;
+        parts.push({
+          text: command.slice(segmentStart, lineEnd),
+          parse: true,
+          separator,
+        });
+        segmentStart = newlineIndex + 1;
+      }
+    }
+
+    if (heredocs.length) {
+      lineStart = hasNewline ? newlineIndex + 1 : command.length;
+      continue;
+    }
+    if (closedHeredoc) {
+      lineStart = hasNewline ? newlineIndex + 1 : command.length;
+      continue;
+    }
+
+    if (hasNewline) {
+      if (!quote && !escaped) {
+        parts.push({
+          text: command.slice(segmentStart, lineEnd),
+          parse: true,
+          separator,
+        });
+        segmentStart = newlineIndex + 1;
+      }
+      if (escaped) escaped = false;
+      lineStart = newlineIndex + 1;
+      continue;
+    }
+
+    if (quote || escaped) return null;
+    lineStart = command.length;
+  }
+
+  if (segmentStart < command.length || !parts.length) {
+    parts.push({
+      text: command.slice(segmentStart),
+      parse: true,
+      separator: "",
+    });
+  }
+  return parts;
+}
+
+function scanShellLine(line, initialQuote, initialEscaped) {
+  let quote = initialQuote;
+  let escaped = initialEscaped;
+  const heredocs = [];
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (line.startsWith("<<", i)) {
+      const heredoc = readHeredocDelimiter(line, i);
+      if (!heredoc) return null;
+      heredocs.push(heredoc);
+      i = heredoc.endIndex - 1;
+    }
+  }
+  if (AMBIGUOUS_TOKENS.some((token) => line.includes(token))) return null;
+  return { quote, escaped, heredocs };
+}
+
+function readHeredocDelimiter(line, index) {
+  let cursor = index + 2;
+  let stripTabs = false;
+  if (line[cursor] === "<") return null;
+  if (line[cursor] === "-") {
+    stripTabs = true;
+    cursor += 1;
+  }
+  while (cursor < line.length && /\s/.test(line[cursor])) cursor += 1;
+  if (cursor >= line.length) return null;
+
+  let delimiter = "";
+  if (line[cursor] === "'" || line[cursor] === '"') {
+    const quote = line[cursor];
+    const start = cursor + 1;
+    cursor = line.indexOf(quote, start);
+    if (cursor < 0) return null;
+    delimiter = line.slice(start, cursor);
+    cursor += 1;
+  } else {
+    const start = cursor;
+    while (cursor < line.length && !/\s/.test(line[cursor])) cursor += 1;
+    delimiter = line.slice(start, cursor);
+  }
+  if (!delimiter) return null;
+  return { delimiter, endIndex: cursor, stripTabs };
+}
+
+function isHeredocTerminator(line, heredoc) {
+  const candidate = heredoc.stripTabs ? line.replace(/^\t+/, "") : line;
+  return candidate === heredoc.delimiter;
 }
 
 function splitTopLevelAndChain(command) {

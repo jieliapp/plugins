@@ -1161,7 +1161,47 @@ test("handoff info and commit trailer helpers support Codex shell aliases and No
     assert.equal("cmd" in cmdResponse.hookSpecificOutput.updatedInput, false);
     const execResponse = runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "exec", tool_input: { command: 'git commit -m "exec path"' } });
     assert.equal(execResponse.hookSpecificOutput.updatedInput.command, 'git commit -m "exec path" --trailer "Jieli-Thread: https://jieli.example.test/threads/T-codex-chain"');
+    const multilineCommand = [
+      "git add docs/2026-10-14-roic-task-isolation.md",
+      "cat > /tmp/commit-message.txt <<'EOF'",
+      "test(finance): isolate roic task failures",
+      "Keep the message text ; | $(literal) and the heredoc unchanged.",
+      "EOF",
+      "git commit -F /tmp/commit-message.txt",
+    ].join("\n");
+    const multilineResponse = runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "exec", tool_input: { command: multilineCommand } });
+    assert.equal(
+      multilineResponse.hookSpecificOutput.updatedInput.command,
+      [
+        "git add docs/2026-10-14-roic-task-isolation.md",
+        "cat > /tmp/commit-message.txt <<'EOF'",
+        "test(finance): isolate roic task failures",
+        "Keep the message text ; | $(literal) and the heredoc unchanged.",
+        "EOF",
+        'git commit -F /tmp/commit-message.txt --trailer "Jieli-Thread: https://jieli.example.test/threads/T-codex-chain"',
+      ].join("\n"),
+    );
+    const multipleCommitCommand = [
+      'git commit -m "first"',
+      'git commit -m "second"',
+    ].join("\n");
+    assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "exec", tool_input: { command: multipleCommitCommand } }), {});
+    const commitAroundHeredocCommand = [
+      'git commit -m "first" && cat <<\'EOF\'',
+      "message body",
+      "EOF",
+      'git commit -m "second"',
+    ].join("\n");
+    assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "exec", tool_input: { command: commitAroundHeredocCommand } }), {});
+    assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "exec", tool_input: { command: 'git status; git commit -m "ship"' } }), {});
     assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "ship" | cat' } }), {});
+    for (const command of [
+      'git status || git commit -m "ship"',
+      'git commit -m "$(date)"',
+      'git commit -m "`date`"',
+    ]) {
+      assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "Bash", tool_input: { command } }), {});
+    }
     assert.deepEqual(runtime.buildHookResponse({ session_id: "codex-chain", tool_name: "Bash", tool_input: { command: 'git commit -m "ship" --trailer Jieli-Thread:old' } }), {});
   });
 
